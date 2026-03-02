@@ -1,0 +1,25 @@
+chill lol:
+1. CREATE 2024 PROFILES
+INPUTS IN:
+    a. AEM Energy generation TOTAL [MI, MII & PV ]
+        - MI: integrate 2023 summer generation profile into 2024 NaNs
+        - id NaN cells
+
+    b. Meiringen PV generation // Surplus Profile
+        - V:"No data on PV generation in Meiringen, but assume that when demand falls, then a lot of the power needed is produced locally with PV"
+        - Will the surplus profile = PV generation ? Create surplus profile?
+        - OR create PV generation profile from PVSolar
+
+    c. Grid profile
+        - Spot price profile * DEFICIT ??? .. need a function for grid profile.
+        - for now: spot price profile
+
+2. UNDERSTANDING NEED (top down)
+    ? How will I sort optimal dispatch of solutions?
+        - threshold surplus/demand?
+        - quarterly ? (seasonal dividing)
+        - just to get a better look at profile
+
+
+IF TIME (& energy :p)
+- Align water level % of MI and MII to the demand/surplus profile --> sanity check into the current use of pondage
