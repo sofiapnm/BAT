@@ -1,0 +1,79 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Jan 3 2023
+@author: Sebastian Ammann
+
+Data Measurement Analisys GEAS95, Mini-TES
+"""
+
+import os
+import numpy as np
+import pandas as pd
+import datetime
+import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
+import plotly.io as pio
+
+#%% Preparation
+
+
+fileName = r"/workspaces/BAT/AEM Python Sim/Data Sorting/DATA/AEM TOTAL 2024.csv"
+# filePath = "C://Users//JumpStart//Desktop//LabVIEW_Setup1//40_Messdaten"
+
+# file = os.path.join(filePath, fileName)
+file = fileName
+
+## Getting date 
+# Get the starting Time in a datetime format
+# date_string  = pd.read_csv(file, sep=',',encoding="ISO-8859-1", header=None, names=['Sales','PV Grid Feed-In','Production MI','Production MII','Production Total','Demand','Surplus','District heating sales'])
+dfData  = pd.read_csv(file, sep=',',encoding="ISO-8859-1", header=None)
+date_string = pd.read_csv(file, sep=',', encoding="ISO-8859-1", header=None, usecols=[0])
+
+#date_string  = date_string .drop(columns='Sales')
+date_string =date_string .to_string()
+date_string =date_string [26:65]
+fmt = "%d.%m.%Y %H:%M:%S"
+Start_time=datetime.datetime.strptime(date_string , fmt)
+
+# Reading file
+dfData = pd.read_csv(file, skiprows = 5, sep=';',encoding="ISO-8859-1")
+dfData=dfData.iloc[1:,:]
+dfData=dfData.astype(float)
+
+# Setting absolut
+dfData["time"]=dfData["time"].astype(int)
+delta_t=dfData.loc[2,"time"]-dfData.loc[1,"time"]
+max_time=dfData.shape[0]*delta_t-delta_t
+timestamp=Start_time.timestamp()
+modified_timestamp = timestamp + max_time
+End_time = datetime.datetime.fromtimestamp(modified_timestamp)
+frequency=str(delta_t)+'S'
+timestamps = pd.date_range(Start_time, End_time,freq=frequency)
+dfData.index = timestamps
+
+
+
+# Create figure
+fig = go.Figure()
+
+# add second y axis
+fig = make_subplots(specs=[[{"secondary_y": True}]])
+
+
+# fig.add_trace(go.Scatter(mode='markers', x=list(dfData.index), y=list(dfData.iloc[:,3]),name=dfData.columns[3],marker=dict(size=1)),secondary_y=False,)
+fig.add_trace(go.Scatter(mode='markers',x=list(dfData.index),y=list(dfData.iloc[:,10]),name=dfData.columns[10],marker=dict(size=1)),secondary_y=False)
+fig.add_trace(go.Scatter(mode='markers',x=list(dfData.index),y=list(dfData.iloc[:,4]),name=dfData.columns[4],yaxis='y2',marker=dict(size=1,color="#12946a")),secondary_y=True)
+fig.add_trace(go.Scatter(mode='markers',x=list(dfData.index),y=list(dfData.iloc[:,4]),name=dfData.columns[4],yaxis='y2',marker=dict(size=1,color="#12946a")),secondary_y=True)
+
+
+# Set title
+fig.update_layout(title_text="TITLE")
+fig.update_yaxes(title_text="Y-AXIS", secondary_y=False)
+fig.update_yaxes(title_text="Y-Axis 2", secondary_y=True)
+
+
+
+
+fig.write_html("Plot1.html")
+
