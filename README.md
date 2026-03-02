@@ -1,19 +1,7 @@
 # BAT
 Optimization model of dispatch solution for excess electricity use
 
-FOR ME: Letter meanings
-A - Added (This is a new file that has been added to the repository)
 
-M - Modified (An existing file has been changed)
-
-D - Deleted (a file has been deleted)
-
-U - Untracked (The file is new or has been changed but has not been added to the repository yet)
-
-C - Conflict (There is a conflict in the file)
-
-R - Renamed (The file has been renamed)
-
-S - Submodule (In repository exists another subrepository)
-
-T - Typechange (The file changed from symlink to regular file, or visa versa)
+Necessary terminal cmds to run all files:
+pip install pandas openpyxl
+python3 -m pip install --upgrade pip
