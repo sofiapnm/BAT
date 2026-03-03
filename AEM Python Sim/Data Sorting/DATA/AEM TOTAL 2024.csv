@@ -1,4 +1,4 @@
-DateTime;Sales - Load?;PV Grid Feed-In;Production MI Amended;Production MII;Production Total;Demand;Surplus;District heating sales;Spot price [Rp/kWh];Spot price [CHF/MWh]
+DateTime;Sales;PV Grid Feed-In;Production MI Amended;Production MII;Production Total;Demand;Surplus;District heating sales;Spot price [Rp/kWh];Spot price [CHF/MWh]
 01.01.2024 00:00;2295.608;0;871.7;1200;2071.7;223.908;0;3506;2.404822;24.048
 01.01.2024 00:15;2419.312;0;831.9;1200;2031.9;387.412;0;3743;2.404822;24.048
 01.01.2024 00:30;2357.828;0;872.5;1160;2032.5;325.328;0;3678;2.404822;24.048

@@ -1,0 +1,31 @@
+import pandas as pd
+import os
+
+# Read the CSV file
+input_path = "/workspaces/BAT/AEM Python Sim/Data Sorting/DATA/AEM TOTAL 2024.csv"
+output_path = "/workspaces/BAT/AEM Python Sim/Data Sorting/DATA/AEM TOTAL 2024_corrected.csv"
+
+df = pd.read_csv(input_path)
+
+# Correct Production Total: sum of PV grid feed-in, Production MI, and Production MII
+df['Production Total'] = df['PV Grid Feed-In'] + df['Production MI'] + df['Production MII']
+
+# Add Total Production Hydro: sum of Production MI and Production MII
+df['Total Production Hydro'] = df['Production MI'] + df['Production MII']
+
+# Calculate the difference: Sales - Production Total
+difference = df['Sales'] - df['Production Total']
+
+# Unmet Demand: when difference is positive
+df['Demand'] = difference.apply(lambda x: x if x > 0 else 0)
+
+# Surplus: absolute value when difference is negative
+df['Surplus'] = difference.apply(lambda x: abs(x) if x < 0 else 0)
+
+# Save the corrected file
+df.to_csv(output_path, index=False)
+
+print(f"File processed successfully!")
+print(f"Output saved to: {output_path}")
+print(f"\nFirst few rows:")
+print(df.head())
