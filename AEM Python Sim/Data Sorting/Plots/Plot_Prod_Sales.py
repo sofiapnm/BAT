@@ -9,16 +9,16 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 # Configuration
-data_path = r"/workspaces/BAT/AEM Python Sim/Data Sorting/DATA/AEM TOTAL 2024.csv"
+data_path = r"/workspaces/BAT/AEM Python Sim/Data Sorting/DATA/AEM TOTAL 2024_corrected.csv"
 output_html = r"/workspaces/BAT/AEM Python Sim/Data Sorting/Plots/Plot Results/Prod_Sales_Plot.html"
 
-# Load data with semicolon delimiter (sep=';') and correct date format (dayfirst=True for DD.MM.YYYY)
-df = pd.read_csv(data_path, sep=';', parse_dates=['DateTime'], dayfirst=True)
+# Load data with comma delimiter (sep=',') and correct date format (dayfirst=True for DD.MM.YYYY)
+df = pd.read_csv(data_path, sep=',', parse_dates=['DateTime'], dayfirst=True)
 print(f"Loaded {len(df)} rows")
 print(f"Columns: {df.columns.tolist()}\n")
 
 # Verify required columns exist
-required_cols = ['DateTime', 'Production Total', 'Sales']#,'Spot price [Rp/kWh]']
+required_cols = ['DateTime', 'Total Production Hydro', 'Sales']#,'Spot price [Rp/kWh]']
 missing = [c for c in required_cols if c not in df.columns]
 if missing:
     raise KeyError(f"Missing columns: {missing}. Available: {df.columns.tolist()}")
@@ -32,7 +32,7 @@ fig = make_subplots(
 fig.add_trace(
     go.Scatter(
         x=df['DateTime'],
-        y=df['Production Total'],
+        y=df['Total Production Hydro'],
         name='Production [kW]',
         mode='lines',
         line=dict(color='#1f77b4', width=1),
@@ -67,7 +67,7 @@ fig.add_trace(
 
 # Update layout
 fig.update_layout(
-    title_text="Production and Sales (2024)",
+    title_text="Production Hydro and Sales (2024)",
     hovermode='x unified',
     height=600,
     template='plotly_white',
@@ -75,7 +75,7 @@ fig.update_layout(
     legend=dict(x=0.01, y=0.99),
 )
 
-fig.update_yaxes(title_text="Production / Sales [kW]", secondary_y=False)
+fig.update_yaxes(title_text="Production Hydro / Sales [kW]", secondary_y=False)
 # fig.update_yaxes(title_text="Spot Price [Rp/kWh]", secondary_y=True)
 
 # Save
@@ -85,6 +85,6 @@ print(f"✓ Plot saved to: {output_html}")
 
 # Show summary stats
 print("\n--- Summary Statistics ---")
-print(f"Production: min={df['Production Total'].min():.2f}, max={df['Production Total'].max():.2f}, mean={df['Production Total'].mean():.2f}")
+print(f"Production: min={df['Total Production Hydro'].min():.2f}, max={df['Total Production Hydro'].max():.2f}, mean={df['Total Production Hydro'].mean():.2f}")
 print(f"Sales:      min={df['Sales'].min():.2f}, max={df['Sales'].max():.2f}, mean={df['Sales'].mean():.2f}")
 # print(f"Spot Price: min={df['Spot price [Rp/kWh]'].min():.2f}, max={df['Spot price [Rp/kWh]'].max():.2f}, mean={df['Spot price [Rp/kWh]'].mean():.2f}")

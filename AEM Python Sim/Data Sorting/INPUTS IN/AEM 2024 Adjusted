@@ -5,13 +5,20 @@ import os
 input_path = "/workspaces/BAT/AEM Python Sim/Data Sorting/DATA/AEM TOTAL 2024.csv"
 output_path = "/workspaces/BAT/AEM Python Sim/Data Sorting/DATA/AEM TOTAL 2024_corrected.csv"
 
-df = pd.read_csv(input_path)
+df = pd.read_csv(input_path, sep=';', parse_dates=['DateTime'], dayfirst=True)
+print(df.columns)
+# Index(['DateTime', 'Sales', 'PV Grid Feed-In', 'Production MI Amended',
+#        'Production MII', …],
+#       dtype='object')
 
-# Correct Production Total: sum of PV grid feed-in, Production MI, and Production MII
-df['Production Total'] = df['PV Grid Feed-In'] + df['Production MI'] + df['Production MII']
-
+# now the next lines work
+df['Production Total'] = (
+        df['PV Grid Feed-In']
+      + df['Production MI Amended']    # note: column name is “Amended”
+      + df['Production MII']
+)
 # Add Total Production Hydro: sum of Production MI and Production MII
-df['Total Production Hydro'] = df['Production MI'] + df['Production MII']
+df['Total Production Hydro'] = df['Production MI Amended'] + df['Production MII']
 
 # Calculate the difference: Sales - Production Total
 difference = df['Sales'] - df['Production Total']
