@@ -144,11 +144,13 @@ def build_and_solve(
         if not solver.available():
             raise RuntimeError(f"Neither {PRIMARY_SOLVER} nor {FALLBACK_SOLVER} is available.")
         results = solver.solve(m, tee=False)
+        solver_used = FALLBACK_SOLVER
     else:
         try:
             for key, val in GUROBI_OPTIONS.items():
                 primary.options[key] = val
             results = primary.solve(m, tee=False)
+            solver_used = PRIMARY_SOLVER
         except Exception as exc:
             err_msg = str(exc).lower()
             if "size-limited license" in err_msg:
@@ -158,6 +160,7 @@ def build_and_solve(
             if not solver.available():
                 raise RuntimeError(f"{PRIMARY_SOLVER} failed and {FALLBACK_SOLVER} is unavailable.") from exc
             results = solver.solve(m, tee=False)
+            solver_used = FALLBACK_SOLVER
     if results.solver.termination_condition != TerminationCondition.optimal:
         raise RuntimeError(f"No optimal solution for {objective_mode}. Condition: {results.solver.termination_condition}")
 
@@ -170,7 +173,7 @@ def build_and_solve(
             "battery_soc_kWh": [value(m.soc[t]) for t in range(n)],
         }
     )
-    return out
+    return out, solver_used
 
 
 def solve_in_windows(production, demand, spot_price, objective_mode, window_steps=192):
@@ -179,6 +182,7 @@ def solve_in_windows(production, demand, spot_price, objective_mode, window_step
 
     n = len(demand)
     chunks = []
+    solvers_used = set()
     soc_now = BATTERY_SOC_INIT_FRAC * BATTERY_CAPACITY_KWH
 
     for start in range(0, n, window_steps):
@@ -186,7 +190,7 @@ def solve_in_windows(production, demand, spot_price, objective_mode, window_step
         is_last = stop == n
         final_soc = BATTERY_SOC_END_FRAC * BATTERY_CAPACITY_KWH if is_last else None
 
-        chunk = build_and_solve(
+        chunk, solver_used = build_and_solve(
             production[start:stop],
             demand[start:stop],
             spot_price[start:stop],
@@ -195,9 +199,10 @@ def solve_in_windows(production, demand, spot_price, objective_mode, window_step
             final_soc_kwh=final_soc,
         )
         chunks.append(chunk)
+        solvers_used.add(solver_used)
         soc_now = float(chunk["battery_soc_kWh"].iloc[-1])
 
-    return pd.concat(chunks, ignore_index=True)
+    return pd.concat(chunks, ignore_index=True), sorted(solvers_used)
 
 
 def main():
@@ -221,7 +226,7 @@ def main():
     full_horizon_end_soc = BATTERY_SOC_END_FRAC * BATTERY_CAPACITY_KWH
 
     try:
-        sol_cost = build_and_solve(
+        sol_cost, solver_cost = build_and_solve(
             production,
             demand,
             spot_price,
@@ -229,7 +234,7 @@ def main():
             init_soc_kwh=full_horizon_init_soc,
             final_soc_kwh=full_horizon_end_soc,
         )
-        sol_emis = build_and_solve(
+        sol_emis, solver_emis = build_and_solve(
             production,
             demand,
             spot_price,
@@ -237,12 +242,16 @@ def main():
             init_soc_kwh=full_horizon_init_soc,
             final_soc_kwh=full_horizon_end_soc,
         )
+        print(f"Solver used for cost objective: {solver_cost}")
+        print(f"Solver used for emissions objective: {solver_emis}")
     except RuntimeError as exc:
         if str(exc) != "GUROBI_SIZE_LIMIT":
             raise
         print("Gurobi size-limited license detected on full-year solve. Switching to rolling windows.")
-        sol_cost = solve_in_windows(production, demand, spot_price, objective_mode="cost", window_steps=192)
-        sol_emis = solve_in_windows(production, demand, spot_price, objective_mode="emissions", window_steps=192)
+        sol_cost, solvers_cost = solve_in_windows(production, demand, spot_price, objective_mode="cost", window_steps=192)
+        sol_emis, solvers_emis = solve_in_windows(production, demand, spot_price, objective_mode="emissions", window_steps=192)
+        print(f"Solver(s) used for cost objective (rolling windows): {', '.join(solvers_cost)}")
+        print(f"Solver(s) used for emissions objective (rolling windows): {', '.join(solvers_emis)}")
 
     # Output table is intentionally separate from the source data:
     # only DateTime + optimization results are written.
@@ -254,15 +263,16 @@ def main():
         results[f"emissions_opt__{col}"] = sol_emis[col].values
 
     # Per-step objective values for direct comparison at each time i
+    spot_price_series = pd.Series(spot_price, index=results.index, dtype=float)
     results["cost_opt__step_cost_rp"] = (
-        results["cost_opt__grid_import_kWh"] * results["spot_price_rp_per_kWh"]
-        - results["cost_opt__grid_export_kWh"] * results["spot_price_rp_per_kWh"]
+        results["cost_opt__grid_import_kWh"] * spot_price_series
+        - results["cost_opt__grid_export_kWh"] * spot_price_series
         + BATTERY_THROUGHPUT_COST_RP_PER_KWH
         * (results["cost_opt__battery_charge_kWh"] + results["cost_opt__battery_discharge_kWh"])
     )
     results["emissions_opt__step_cost_rp"] = (
-        results["emissions_opt__grid_import_kWh"] * results["spot_price_rp_per_kWh"]
-        - results["emissions_opt__grid_export_kWh"] * results["spot_price_rp_per_kWh"]
+        results["emissions_opt__grid_import_kWh"] * spot_price_series
+        - results["emissions_opt__grid_export_kWh"] * spot_price_series
         + BATTERY_THROUGHPUT_COST_RP_PER_KWH
         * (results["emissions_opt__battery_charge_kWh"] + results["emissions_opt__battery_discharge_kWh"])
     )
