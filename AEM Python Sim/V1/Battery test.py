@@ -24,7 +24,7 @@ OUTPUT_PATH = "/workspaces/BAT/AEM Python Sim/V1/Results/battery_optimization_re
 # 15-minute intervals
 DELTA_T_H = 0.25
 
-# Battery technical limits (edit these to match your real asset)
+# Battery technical limits (create two possible solutions: many small batteries or large 1)
 BATTERY_CAPACITY_KWH = 4000.0
 BATTERY_SOC_MIN_FRAC = 0.05
 BATTERY_SOC_MAX_FRAC = 0.95
