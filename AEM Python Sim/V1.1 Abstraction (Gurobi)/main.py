@@ -5,6 +5,7 @@ from parameters.general import GENERAL
 from results import (
     build_kwh_results_table,
     build_results_table,
+    extract_monthly_peak_solution,
     extract_solution,
     print_summary,
     save_results,
@@ -25,28 +26,33 @@ def main():
         production_kwh=data["production"],
         demand_kwh=data["demand"],
         spot_price_rp_per_kwh=data["spot_price"],
+        datetime_series=data["datetime"],
         objective_mode="cost",
         init_soc_kwh=full_horizon_init_soc,
         final_soc_kwh=full_horizon_end_soc,
     )
     solve_model(model_cost, objective_mode="cost")
     sol_cost = extract_solution(vars_cost, len(data["demand"]))
+    monthly_peak_cost = extract_monthly_peak_solution(vars_cost)
 
     model_emis, vars_emis = build_model(
         production_kwh=data["production"],
         demand_kwh=data["demand"],
         spot_price_rp_per_kwh=data["spot_price"],
+        datetime_series=data["datetime"],
         objective_mode="emissions",
         init_soc_kwh=full_horizon_init_soc,
         final_soc_kwh=full_horizon_end_soc,
     )
     solve_model(model_emis, objective_mode="emissions")
     sol_emis = extract_solution(vars_emis, len(data["demand"]))
+    monthly_peak_emis = extract_monthly_peak_solution(vars_emis)
 
     kwh_results = build_kwh_results_table(
         datetime_series=data["datetime"],
         load_profile=data["demand"],
         production_profile=data["production"],
+        spot_price_profile=data["spot_price"],
         solution=sol_cost,
     )
 
@@ -55,6 +61,8 @@ def main():
         sol_cost=sol_cost,
         sol_emis=sol_emis,
         spot_price=data["spot_price"],
+        monthly_peak_cost=monthly_peak_cost,
+        monthly_peak_emis=monthly_peak_emis,
     )
 
     save_results(kwh_results, GENERAL["kwh_output_path"])

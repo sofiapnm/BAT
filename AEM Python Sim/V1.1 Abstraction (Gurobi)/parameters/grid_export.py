@@ -4,10 +4,15 @@ EXPORT_TECHNICAL = {
 }
 
 EXPORT_ECONOMIC = {
-    # Arbitrary placeholder value:
-    "expansion_cost_rp_per_mw": 0.0,
+    "fixed_tariff_rp_per_kwh": 1.08,
+    "expansion_cost_rp_per_mw": 5000000.0,
+    "power_tariff_rp_per_kw_per_month": 1143.0,
 }
 
 EXPORT_EMISSIONS = {
-    "export_emissions_credit_kgco2_per_kwh": 0.0,
+    "export_emissions_credit_kgco2_per_kwh": 0.043, #DOUBLE CHECK!!
 }
+
+
+def export_price_rp_per_kwh(spot_price_rp_per_kwh):
+    return spot_price_rp_per_kwh - EXPORT_ECONOMIC["fixed_tariff_rp_per_kwh"]

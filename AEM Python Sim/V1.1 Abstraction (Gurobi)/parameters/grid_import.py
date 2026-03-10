@@ -5,11 +5,15 @@ IMPORT_TECHNICAL = {
 
 IMPORT_ECONOMIC = {
     # The time-varying import price profile still comes from the CSV.
-    # This is just a placeholder for future expansion decisions.
-    # Arbitrary placeholder value:
-    "expansion_cost_rp_per_mw": 0.0,
+    "expansion_cost_rp_per_mw": 5000000.0,
+    "fixed_tariff_rp_per_kwh": 1.08,
+    "power_tariff_rp_per_kw_per_month": 1143.0,
 }
 
 IMPORT_EMISSIONS = {
-    "grid_emissions_kgco2_per_kwh": 0.35,
+    "grid_emissions_kgco2_per_kwh": 0.043,
 }
+
+
+def import_price_rp_per_kwh(spot_price_rp_per_kwh):
+    return spot_price_rp_per_kwh + IMPORT_ECONOMIC["fixed_tariff_rp_per_kwh"]
