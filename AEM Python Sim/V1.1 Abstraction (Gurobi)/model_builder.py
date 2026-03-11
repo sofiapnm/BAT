@@ -51,6 +51,7 @@ def build_model(
     add_objective(
         model=model,
         vars_dict=vars_dict,
+        production_kwh=production_kwh,
         spot_price_rp_per_kwh=spot_price_rp_per_kwh,
         objective_mode=objective_mode,
         n=n,

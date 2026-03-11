@@ -10,7 +10,7 @@ EXPORT_ECONOMIC = {
 }
 
 EXPORT_EMISSIONS = {
-    "export_emissions_credit_kgco2_per_kwh": 0.043, #DOUBLE CHECK!!
+    "export_emissions_credit_kgco2_per_kwh": 0.128, #from William's report+2018, check w Malin
 }
 
 

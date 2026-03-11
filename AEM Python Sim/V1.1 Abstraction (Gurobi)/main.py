@@ -60,6 +60,7 @@ def main():
         datetime_series=data["datetime"],
         sol_cost=sol_cost,
         sol_emis=sol_emis,
+        production=data["production"],
         spot_price=data["spot_price"],
         monthly_peak_cost=monthly_peak_cost,
         monthly_peak_emis=monthly_peak_emis,

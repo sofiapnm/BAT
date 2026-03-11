@@ -3,6 +3,7 @@ import pandas as pd
 from parameters.battery import BATTERY_ECONOMIC, BATTERY_TECHNICAL
 from parameters.grid_import import IMPORT_ECONOMIC, IMPORT_EMISSIONS, import_price_rp_per_kwh
 from parameters.grid_export import EXPORT_ECONOMIC, EXPORT_EMISSIONS, export_price_rp_per_kwh
+from parameters.runofriver import RUNOFRIVER_ECONOMIC
 
 
 def extract_solution(vars_dict, n):
@@ -46,7 +47,15 @@ def build_kwh_results_table(
     return results
 
 
-def build_results_table(datetime_series, sol_cost, sol_emis, spot_price, monthly_peak_cost, monthly_peak_emis):
+def build_results_table(
+    datetime_series,
+    sol_cost,
+    sol_emis,
+    production,
+    spot_price,
+    monthly_peak_cost,
+    monthly_peak_emis,
+):
     results = pd.DataFrame({"DateTime": datetime_series})
 
     for col in sol_cost.columns:
@@ -65,11 +74,13 @@ def build_results_table(datetime_series, sol_cost, sol_emis, spot_price, monthly
     export_power_tariff = EXPORT_ECONOMIC["power_tariff_rp_per_kw_per_month"]
     grid_emissions = IMPORT_EMISSIONS["grid_emissions_kgco2_per_kwh"]
     export_credit = EXPORT_EMISSIONS["export_emissions_credit_kgco2_per_kwh"]
+    runofriver_profit_per_kwh = RUNOFRIVER_ECONOMIC["profit_rp_per_kwh"]
 
     if import_power_tariff != export_power_tariff:
         raise ValueError("Import and export monthly power tariffs must match.")
 
     spot_price_series = pd.Series(spot_price, index=results.index, dtype=float)
+    production_series = pd.Series(production, index=results.index, dtype=float)
     month_labels = pd.to_datetime(datetime_series).dt.to_period("M").astype(str)
     first_step_in_month = ~month_labels.duplicated()
     monthly_power_cost_cost = month_labels.map(monthly_peak_cost).astype(float) * import_power_tariff
@@ -79,6 +90,12 @@ def build_results_table(datetime_series, sol_cost, sol_emis, spot_price, monthly
     results["emissions_opt__monthly_power_tariff_rp"] = 0.0
     results["cost_opt__battery_fixed_cost_rp"] = 0.0
     results["emissions_opt__battery_fixed_cost_rp"] = 0.0
+    results["cost_opt__runofriver_profit_rp"] = (
+        production_series * runofriver_profit_per_kwh
+    )
+    results["emissions_opt__runofriver_profit_rp"] = (
+        production_series * runofriver_profit_per_kwh
+    )
     results.loc[first_step_in_month, "cost_opt__monthly_power_tariff_rp"] = monthly_power_cost_cost[first_step_in_month].values
     results.loc[first_step_in_month, "emissions_opt__monthly_power_tariff_rp"] = monthly_power_cost_emis[first_step_in_month].values
     if len(results) > 0:
@@ -93,6 +110,7 @@ def build_results_table(datetime_series, sol_cost, sol_emis, spot_price, monthly
             results["cost_opt__battery_charge_kWh"]
             + results["cost_opt__battery_discharge_kWh"]
         )
+        - results["cost_opt__runofriver_profit_rp"]
         + results["cost_opt__monthly_power_tariff_rp"]
         + results["cost_opt__battery_fixed_cost_rp"]
     )
@@ -105,6 +123,7 @@ def build_results_table(datetime_series, sol_cost, sol_emis, spot_price, monthly
             results["emissions_opt__battery_charge_kWh"]
             + results["emissions_opt__battery_discharge_kWh"]
         )
+        - results["emissions_opt__runofriver_profit_rp"]
         + results["emissions_opt__monthly_power_tariff_rp"]
         + results["emissions_opt__battery_fixed_cost_rp"]
     )

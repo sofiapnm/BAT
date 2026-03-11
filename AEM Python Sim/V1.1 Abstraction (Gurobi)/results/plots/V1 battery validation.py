@@ -1,10 +1,20 @@
+from pathlib import Path
+import sys
+
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+# Allow running this file directly from the plots directory.
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from parameters.runofriver import RUNOFRIVER_ECONOMIC
+
 
 CSV_PATH = "/workspaces/BAT/AEM Python Sim/V1.1 Abstraction (Gurobi)/results/V1 kWh Results.csv"
-HTML_OUTPUT_PATH = "/workspaces/BAT/AEM Python Sim/V1.1 Abstraction (Gurobi)/results/plots/V1 kWh profiles result.html"
+HTML_OUTPUT_PATH = "/workspaces/BAT/AEM Python Sim/V1.1 Abstraction (Gurobi)/results/plots/V1 battery validation.html"
 
 
 def build_figure(dataframe):
@@ -21,15 +31,18 @@ def build_figure(dataframe):
         "load_kWh",
         "production_kWh",
         "grid_export_import_kWh",
-        "battery_soc_kWh",
+        "battery_net_flow_kWh",
     ]
 
     colors = {
         "load_kWh": "#1f77b4",
         "production_kWh": "#2ca02c",
         "grid_export_import_kWh": "#d62728",
+        "battery_net_flow_kWh": "#17becf",
         "battery_soc_kWh": "#BE34E0",
+        "battery_charge_discharge_kWh": "#9467bd",
         "spot price [Rp/kWh]": "#111111",
+        "runofriver profit [Rp/kWh]": "#ff7f0e",
     }
 
     for column in flow_columns:
@@ -61,10 +74,36 @@ def build_figure(dataframe):
     fig.add_trace(
         go.Scatter(
             x=dataframe["DateTime"],
+            y=dataframe["battery_charge_discharge_kWh"],
+            mode="lines",
+            name="battery_charge_discharge_kWh",
+            line={"width": 1, "color": colors["battery_charge_discharge_kWh"]},
+        ),
+        row=2,
+        col=1,
+        secondary_y=False,
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=dataframe["DateTime"],
             y=dataframe["spot price [Rp/kWh]"],
             mode="lines",
             name="spot price [Rp/kWh]",
             line={"width": 1, "color": colors["spot price [Rp/kWh]"]},
+        ),
+        row=2,
+        col=1,
+        secondary_y=True,
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=dataframe["DateTime"],
+            y=dataframe["runofriver profit [Rp/kWh]"],
+            mode="lines",
+            name="runofriver profit [Rp/kWh]",
+            line={"width": 1, "color": colors["runofriver profit [Rp/kWh]"], "dash": "dash"},
         ),
         row=2,
         col=1,
@@ -77,7 +116,7 @@ def build_figure(dataframe):
     fig.update_xaxes(title_text="DateTime", row=2, col=1)
 
     fig.update_layout(
-        title="V1 kWh Profiles",
+        title="V1 Battery Validation",
         template="plotly_white",
         hovermode="x unified",
         height=850,
@@ -91,6 +130,11 @@ def main():
     df = pd.read_csv(CSV_PATH)
     df["DateTime"] = pd.to_datetime(df["DateTime"])
     df["grid_export_import_kWh"] = df["grid_import_kWh"] - df["grid_export_kWh"]
+    df["battery_net_flow_kWh"] = df["battery_discharge_kWh"] - df["battery_charge_kWh"]
+    df["battery_charge_discharge_kWh"] = (
+        df["battery_charge_kWh"] - df["battery_discharge_kWh"]
+    )
+    df["runofriver profit [Rp/kWh]"] = RUNOFRIVER_ECONOMIC["profit_rp_per_kwh"]
     fig = build_figure(df)
     fig.write_html(HTML_OUTPUT_PATH)
     fig.show()

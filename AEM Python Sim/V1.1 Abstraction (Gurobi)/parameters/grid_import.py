@@ -11,7 +11,7 @@ IMPORT_ECONOMIC = {
 }
 
 IMPORT_EMISSIONS = {
-    "grid_emissions_kgco2_per_kwh": 0.043,
+    "grid_emissions_kgco2_per_kwh": 0.128, #from William's report+2018, check w Malin
 }
 
 

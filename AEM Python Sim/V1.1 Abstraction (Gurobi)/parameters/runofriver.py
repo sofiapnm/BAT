@@ -1,0 +1,4 @@
+RUNOFRIVER_ECONOMIC = {
+    "profit_rp_per_kwh": (12.50 - 6.00) + 11.00, #11rp/kwh uncertain (grid usage)
+    # "profit_rp_per_month": 450.0 + 967.0, #967 rp/month uncertain (grid usage)
+}
