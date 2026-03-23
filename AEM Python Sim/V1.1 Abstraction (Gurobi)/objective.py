@@ -2,9 +2,10 @@ import gurobipy as gp
 from gurobipy import GRB
 
 from parameters.battery import BATTERY_ECONOMIC, BATTERY_TECHNICAL
-from parameters.grid_import import IMPORT_ECONOMIC, IMPORT_EMISSIONS, import_price_rp_per_kwh
-from parameters.grid_export import EXPORT_ECONOMIC, EXPORT_EMISSIONS, export_price_rp_per_kwh
-from parameters.runofriver import RUNOFRIVER_ECONOMIC
+from parameters.grid_import import IMPORT_ECONOMIC, IMPORT_EMISSIONS
+from parameters.general import GENERAL
+from parameters.grid_export import EXPORT_ECONOMIC, EXPORT_EMISSIONS, EXPORT_TECHNICAL
+from parameters.runofriver import RUNOFRIVER_ECONOMIC, RUNOFRIVER_EMISSIONS
 
 
 def add_objective(
@@ -23,27 +24,65 @@ def add_objective(
     unique_month_labels = vars_dict["unique_month_labels"]
 
     battery_capacity_kwh = BATTERY_TECHNICAL["capacity_kwh"]
-    battery_capex = BATTERY_ECONOMIC["capex_rp"]
+    battery_capex = BATTERY_ECONOMIC["capex_rp_kwh"] * battery_capacity_kwh
     battery_annual_opex = (
         BATTERY_ECONOMIC["annual_opex_rp_per_kwh_year"] * battery_capacity_kwh
     )
     battery_degradation_cost = BATTERY_ECONOMIC["degradation_cost_rp_per_kwh_throughput"]
-    import_power_tariff = IMPORT_ECONOMIC["power_tariff_rp_per_kw_per_month"]
-    export_power_tariff = EXPORT_ECONOMIC["power_tariff_rp_per_kw_per_month"]
     grid_emissions = IMPORT_EMISSIONS["grid_emissions_kgco2_per_kwh"]
-    export_credit = EXPORT_EMISSIONS["export_emissions_credit_kgco2_per_kwh"]
+    export_emissions = EXPORT_EMISSIONS["export_emissions_kgco2_per_kwh"]
     runofriver_profit_per_kwh = RUNOFRIVER_ECONOMIC["profit_rp_per_kwh"]
-
-    if import_power_tariff != export_power_tariff:
-        raise ValueError("Import and export monthly power tariffs must match.")
+    runofriver_emissions_per_kwh = RUNOFRIVER_EMISSIONS["emissions_kgco2eq_per_kwh_generated"]
+    import_high_use_tariff = IMPORT_ECONOMIC["fixed_tariff_high_grid_use_rp_per_kwh"]
+    import_low_use_tariff = IMPORT_ECONOMIC["fixed_tariff_low_grid_use_rp_per_kwh"]
+    export_high_use_tariff = EXPORT_ECONOMIC["fixed_tariff_high_grid_use_rp_per_kwh"]
+    export_low_use_tariff = EXPORT_ECONOMIC["fixed_tariff_low_grid_use_rp_per_kwh"]
+    power_tariff_high_use = IMPORT_ECONOMIC["power_tariff_high_grid_use_rp_per_kw_per_month"]
+    power_tariff_low_use = IMPORT_ECONOMIC["power_tariff_low_grid_use_rp_per_kw_per_month"]
+    annual_grid_use_threshold_kwh = (
+        EXPORT_ECONOMIC["annual_grid_use_threshold_h"]
+        * EXPORT_TECHNICAL["existing_grid_limit_mw"]
+        * 1000.0
+    )
+    annual_grid_use_upper_bound_kwh = (
+        2.0
+        * n
+        * EXPORT_TECHNICAL["existing_grid_limit_mw"]
+        * 1000.0
+        * GENERAL["delta_t_h"]
+    )
 
     if objective_mode == "cost": # - : profit , + = cost
+        annual_grid_use_kwh = gp.quicksum(
+            grid_import[t] + grid_export[t] for t in range(n)
+        )
+        annual_export_kwh = gp.quicksum(grid_export[t] for t in range(n))
+        export_low_grid_use = model.addVar(
+            vtype=GRB.BINARY, name="export_low_grid_use_tariff_active"
+        )
+        model.addConstr(
+            annual_grid_use_kwh
+            <= annual_grid_use_threshold_kwh
+            + annual_grid_use_upper_bound_kwh * (1 - export_low_grid_use),
+            name="export_low_grid_use_upper_bound",
+        )
+        model.addConstr(
+            annual_grid_use_kwh
+            >= annual_grid_use_threshold_kwh
+            - annual_grid_use_upper_bound_kwh * export_low_grid_use,
+            name="export_low_grid_use_lower_bound",
+        )
         expr = gp.quicksum(
-            grid_import[t] * import_price_rp_per_kwh(spot_price_rp_per_kwh[t])
-            - grid_export[t] * export_price_rp_per_kwh(spot_price_rp_per_kwh[t])
+            grid_import[t] * (spot_price_rp_per_kwh[t] + import_high_use_tariff)
+            - grid_export[t] * (spot_price_rp_per_kwh[t] - export_high_use_tariff)
             + battery_degradation_cost * (batt_charge[t] + batt_discharge[t]) #dcheck if its right..
             for t in range(n)
-        ) + import_power_tariff * gp.quicksum(
+        ) + (import_low_use_tariff - import_high_use_tariff) * export_low_grid_use * annual_grid_use_kwh + (
+            export_low_use_tariff - export_high_use_tariff - (import_low_use_tariff - import_high_use_tariff)
+        ) * export_low_grid_use * annual_export_kwh + (
+            power_tariff_high_use
+            + (power_tariff_low_use - power_tariff_high_use) * export_low_grid_use
+        ) * gp.quicksum(
             monthly_peak_kw[month_label] for month_label in unique_month_labels
         ) + battery_capex + battery_annual_opex - gp.quicksum(
             production_kwh[t] * runofriver_profit_per_kwh for t in range(n)
@@ -51,7 +90,8 @@ def add_objective(
     elif objective_mode == "emissions":
         expr = gp.quicksum(
             grid_import[t] * grid_emissions
-            - grid_export[t] * export_credit
+            + grid_export[t] * export_emissions
+            + production_kwh[t] * runofriver_emissions_per_kwh
             for t in range(n)
         )
     else:
