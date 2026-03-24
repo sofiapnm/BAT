@@ -1,6 +1,7 @@
 import pandas as pd
 
 from parameters.battery import BATTERY_ECONOMIC, BATTERY_TECHNICAL
+from parameters.general import GENERAL
 from parameters.grid_import import (
     IMPORT_EMISSIONS,
     annual_grid_use_hours as annual_import_grid_use_hours,
@@ -238,8 +239,17 @@ def print_summary(results, output_path):
     total_cost_emisobj = results["emissions_opt__step_cost_rp"].sum()
     total_emis_costobj = results["cost_opt__step_emissions_kgco2"].sum()
     total_emis_emisobj = results["emissions_opt__step_emissions_kgco2"].sum()
+    total_emis_costobj_tco2eq = total_emis_costobj / 1000.0
+    total_emis_emisobj_tco2eq = total_emis_emisobj / 1000.0
+    emissions_penalty = GENERAL["emissions_penalty"]
     net_profit_costobj_chf = -total_cost_costobj / 100.0
     net_profit_emisobj_chf = -total_cost_emisobj / 100.0
+    cost_with_emission_penalty_costobj_chf = (
+        net_profit_costobj_chf - (total_emis_costobj_tco2eq * emissions_penalty)
+    )
+    cost_with_emission_penalty_emisobj_chf = (
+        net_profit_emisobj_chf - (total_emis_emisobj_tco2eq * emissions_penalty)
+    )
 
     print("Optimization complete.")
     print(f"Rows solved (15-min intervals): {len(results)}")
@@ -247,6 +257,19 @@ def print_summary(results, output_path):
     print("")
     print("Annual totals")
     print(f"Cost objective -> net annual profit [CHF]: {net_profit_costobj_chf:,.2f}")
-    print(f"Cost objective -> annual emissions burden [kgCO2]: {total_emis_costobj:,.2f}")
+    print(
+        f"Cost objective -> annual emissions burden [tCO2eq]: {total_emis_costobj_tco2eq:,.2f}"
+    )
+    print(
+        "Cost objective -> cost considering emission penalty [CHF]: "
+        f"{cost_with_emission_penalty_costobj_chf:,.2f}"
+    )
     print(f"Emissions objective -> net annual profit [CHF]: {net_profit_emisobj_chf:,.2f}")
-    print(f"Emissions objective -> annual emissions burden [kgCO2]: {total_emis_emisobj:,.2f}")
+    print(
+        "Emissions objective -> annual emissions burden "
+        f"[tCO2eq]: {total_emis_emisobj_tco2eq:,.2f}"
+    )
+    print(
+        "Emissions objective -> cost considering emission penalty [CHF]: "
+        f"{cost_with_emission_penalty_emisobj_chf:,.2f}"
+    )

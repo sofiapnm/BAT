@@ -3,8 +3,8 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 #need to change csv path for v1.2
-CSV_PATH = "/workspaces/BAT/AEM Python Sim/V1.1 Abstraction (Gurobi)/results/V1 kWh Results.csv"
-HTML_OUTPUT_PATH = "/workspaces/BAT/AEM Python Sim/V1.1 Abstraction (Gurobi)/results/plots/V1 energy balance plot.html"
+CSV_PATH = "/workspaces/BAT/AEM Python Sim/V1.2 Pareto Front/V1.1 Abstraction (Gurobi)/results/V1 kWh Results.csv"
+HTML_OUTPUT_PATH = "/workspaces/BAT/AEM Python Sim/V1.2 Pareto Front/V1.1 Abstraction (Gurobi)/results/plots/V1.2 energy balance plot.html"
 
 
 def build_figure(dataframe):
