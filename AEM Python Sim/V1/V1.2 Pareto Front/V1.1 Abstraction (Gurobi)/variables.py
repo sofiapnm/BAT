@@ -20,6 +20,8 @@ def add_variables(model, n):
         n, lb=0.0, vtype=GRB.CONTINUOUS, name="batt_discharge"
     )
 
+#add a battery capacity variable
+
     soc_lb = BATTERY_TECHNICAL["soc_min_frac"] * BATTERY_TECHNICAL["capacity_kwh"]
     soc_ub = BATTERY_TECHNICAL["soc_max_frac"] * BATTERY_TECHNICAL["capacity_kwh"]
 

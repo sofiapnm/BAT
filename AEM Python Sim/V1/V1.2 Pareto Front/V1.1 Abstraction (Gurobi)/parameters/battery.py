@@ -1,7 +1,7 @@
 #for capacity of 1-2MW, the following economic costs can be considered as correct
 #TECHNICAL AND EMISSION FACTORS HAVE TO BE REVISED
 BATTERY_TECHNICAL = {
-    "capacity_kwh": 2000.0, 
+    "capacity_kwh": 200.0, 
     "soc_min_frac": 0.05,
     "soc_max_frac": 0.95,
     "soc_init_frac": 0.50,
