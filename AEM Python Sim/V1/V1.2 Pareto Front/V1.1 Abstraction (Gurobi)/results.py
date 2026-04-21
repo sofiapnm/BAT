@@ -1,4 +1,5 @@
 import pandas as pd
+from pathlib import Path
 
 from parameters.battery import BATTERY_ECONOMIC, BATTERY_TECHNICAL
 from parameters.general import GENERAL
@@ -231,6 +232,8 @@ def summarize_solution(
 
 
 def save_results(results, output_path):
+    output_parent = Path(output_path).parent
+    output_parent.mkdir(parents=True, exist_ok=True)
     results.to_csv(output_path, index=False)
 
 
