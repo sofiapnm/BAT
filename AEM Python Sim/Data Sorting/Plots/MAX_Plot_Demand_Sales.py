@@ -9,11 +9,17 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 # Configuration
-data_path = r"/workspaces/BAT/AEM Python Sim/Data Sorting/DATA/AEM TOTAL 2024.csv"
-output_html = r"/workspaces/BAT/AEM Python Sim/Data Sorting/Plots/SpotPrice_Plot.html"
+data_path = r"/workspaces/BAT/AEM Python Sim/Data Sorting/DATA/maxprod2024.csv"
+output_html = r"/workspaces/BAT/AEM Python Sim/Data Sorting/Plots/MAXPROD_SpotPrice_Plot.html"
+corrected_path = r"/workspaces/BAT/AEM Python Sim/Data Sorting/DATA/AEM TOTAL 2024_corrected.csv"
 
-# Load data with semicolon delimiter (sep=';') and correct date format (dayfirst=True for DD.MM.YYYY)
-df = pd.read_csv(data_path, sep=';', parse_dates=['DateTime'], dayfirst=True)
+# Load data with comma delimiter (sep=',') and correct date format (dayfirst=True for DD.MM.YYYY)
+df = pd.read_csv(data_path, sep=',', parse_dates=['DateTime'], dayfirst=True)
+# Load corrected AEM file to extract its Surplus series for comparison
+try:
+    aem_df = pd.read_csv(corrected_path, sep=',', parse_dates=['DateTime'], dayfirst=True)
+except Exception:
+    aem_df = pd.DataFrame()
 print(f"Loaded {len(df)} rows")
 print(f"Columns: {df.columns.tolist()}\n")
 
@@ -42,14 +48,39 @@ fig.add_trace(
     secondary_y=False,
 )
 
+# Prepare AEM Surplus (from corrected CSV)
+if not aem_df.empty and 'Surplus' in aem_df.columns:
+    aem_surplus = pd.to_numeric(aem_df['Surplus'], errors='coerce').fillna(0)
+else:
+    aem_surplus = pd.Series(0, index=df.index)
+
+maxprod_surplus = pd.to_numeric(df['Surplus'], errors='coerce').fillna(0)
+potential_surplus = (-maxprod_surplus).where(~maxprod_surplus.reset_index(drop=True).eq(aem_surplus.reset_index(drop=True)), other=float('nan'))
+
+
+
+# Surplus trace from the MAXprod data
 fig.add_trace(
     go.Scatter(
         x=df['DateTime'],
-        y=df['Surplus'],
-        name='Surplus [kW]',
+        y=potential_surplus,
+        name='Surplus (Potential)',
+        mode='lines',
+        line=dict(color='#9467bd', width=1),
+        hovertemplate='<b>Surplus (MAXprod)</b><br>%{x}<br>%{y:.2f} kW<extra></extra>'
+    ),
+    secondary_y=False,
+)
+
+# Surplus trace from the corrected AEM file
+fig.add_trace(
+    go.Scatter(
+        x=df['DateTime'],
+        y=-aem_surplus,
+        name='Surplus (AEM)',
         mode='lines',
         line=dict(color='#ff7f0e', width=1),
-        hovertemplate='<b>Surplus</b><br>%{x}<br>%{y:.2f} kW<extra></extra>'
+        hovertemplate='<b>Surplus (AEM)</b><br>%{x}<br>%{y:.2f} kW<extra></extra>'
     ),
     secondary_y=False,
 )
