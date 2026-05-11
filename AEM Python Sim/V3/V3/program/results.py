@@ -13,7 +13,9 @@ from parameters.grid_export import (
     EXPORT_EMISSIONS,
     export_price_rp_per_kwh,
 )
+from parameters.grid_thermal import GRID_THERMAL_ECONOMIC
 from parameters.runofriver import RUNOFRIVER_ECONOMIC, RUNOFRIVER_EMISSIONS
+from parameters.woodchip_boiler import WOODCHIP_BOILER_ECONOMIC, WOODCHIP_BOILER_EMISSIONS
 
 
 def extract_solution(vars_dict, n):
@@ -27,6 +29,8 @@ def extract_solution(vars_dict, n):
             "battery_discharge_kWh": [vars_dict["batt_discharge"][t].X for t in range(n)],
             "battery_soc_kWh": [vars_dict["soc"][t].X for t in range(n)],
             "prod_for_local_demand_kWh": [vars_dict["prod_for_local_demand"][t].X for t in range(n)],
+            "woodchip_boiler_heat_kWhth": [vars_dict["woodchip_boiler_heat_kWhth"][t].X for t in range(n)],
+            "woodchip_heat_supply_share": [vars_dict["woodchip_heat_supply_share"][t].X for t in range(n)],
         }
     )
 
@@ -43,12 +47,16 @@ def extract_monthly_peak_solution(vars_dict):
 def build_kwh_results_table(
     datetime_series,
     load_profile,
+    heatdemand_profile,
     production_profile,
     spot_price_profile,
     solution,
 ):
     results = pd.DataFrame({"DateTime": datetime_series})
     results["load_kWh"] = pd.Series(load_profile, index=results.index, dtype=float)
+    results["heatdemand_kWhth"] = pd.Series(
+        heatdemand_profile, index=results.index, dtype=float
+    )
     results["production_kWh"] = pd.Series(production_profile, index=results.index, dtype=float)
     results["spot price [Rp/kWh]"] = pd.Series(
         spot_price_profile, index=results.index, dtype=float
@@ -65,6 +73,7 @@ def build_results_table(
     sol_cost,
     sol_emis,
     production,
+    heatdemand_profile,
     spot_price,
     monthly_peak_cost,
     monthly_peak_emis,
@@ -78,7 +87,7 @@ def build_results_table(
         results[f"emissions_opt__{col}"] = sol_emis[col].values
 
     battery_capacity_kwh = BATTERY_TECHNICAL["capacity_kwh"]
-    battery_capex = BATTERY_ECONOMIC["capex_rp_kwh"] * battery_capacity_kwh
+    battery_capex = BATTERY_ECONOMIC["annual_capex_rp_per_kwh_amortized"] * battery_capacity_kwh
     battery_annual_opex = (
         BATTERY_ECONOMIC["annual_opex_rp_per_kwh_year"] * battery_capacity_kwh
     )
@@ -87,6 +96,9 @@ def build_results_table(
     export_emissions = EXPORT_EMISSIONS["export_emissions_kgco2_per_kwh"]
     runofriver_profit_per_kwh = RUNOFRIVER_ECONOMIC["profit_rp_per_kwh"]
     runofriver_emissions_per_kwh = RUNOFRIVER_EMISSIONS["emissions_kgco2eq_per_kwh_generated"]
+    woodchip_cost_per_kwhth = WOODCHIP_BOILER_ECONOMIC["cost_rp_per_kwhth_useful"]
+    thermal_revenue_per_kwhth = GRID_THERMAL_ECONOMIC["revenue_rp_per_kwhth_sold"]
+    woodchip_emissions_per_kwhth = WOODCHIP_BOILER_EMISSIONS["emissions_kgco2eq_per_kwhth"]
 
     spot_price_series = pd.Series(spot_price, index=results.index, dtype=float)
     production_series = pd.Series(production, index=results.index, dtype=float)
@@ -114,10 +126,34 @@ def build_results_table(
     emis_local_demand_series = pd.Series(
         sol_emis["prod_for_local_demand_kWh"], index=results.index, dtype=float
     )
+    if "woodchip_boiler_heat_kWhth" in sol_cost:
+        cost_woodchip_heat_series = pd.Series(
+            sol_cost["woodchip_boiler_heat_kWhth"], index=results.index, dtype=float
+        )
+    else:
+        cost_woodchip_heat_series = pd.Series(0.0, index=results.index, dtype=float)
+
+    if "woodchip_boiler_heat_kWhth" in sol_emis:
+        emis_woodchip_heat_series = pd.Series(
+            sol_emis["woodchip_boiler_heat_kWhth"], index=results.index, dtype=float
+        )
+    else:
+        emis_woodchip_heat_series = pd.Series(0.0, index=results.index, dtype=float)
+
+    thermal_revenue_series = pd.Series(heatdemand_profile, index=results.index, dtype=float) * thermal_revenue_per_kwhth
+
     results["cost_opt__monthly_power_tariff_rp"] = 0.0
     results["emissions_opt__monthly_power_tariff_rp"] = 0.0
     results["cost_opt__battery_fixed_cost_rp"] = 0.0
     results["emissions_opt__battery_fixed_cost_rp"] = 0.0
+    results["cost_opt__woodchip_cost_rp"] = (
+        cost_woodchip_heat_series * woodchip_cost_per_kwhth
+    )
+    results["cost_opt__thermal_revenue_rp"] = thermal_revenue_series
+    results["emissions_opt__woodchip_cost_rp"] = (
+        emis_woodchip_heat_series * woodchip_cost_per_kwhth
+    )
+    results["emissions_opt__thermal_revenue_rp"] = thermal_revenue_series
     results["cost_opt__runofriver_profit_rp"] = (
         cost_local_demand_series * runofriver_profit_per_kwh
     )
@@ -141,6 +177,8 @@ def build_results_table(
             + results["cost_opt__battery_discharge_kWh"]
         )
         - results["cost_opt__runofriver_profit_rp"]
+        + results["cost_opt__woodchip_cost_rp"]
+        - results["cost_opt__thermal_revenue_rp"]
         + results["cost_opt__monthly_power_tariff_rp"]
         + results["cost_opt__battery_fixed_cost_rp"]
     )
@@ -156,6 +194,8 @@ def build_results_table(
             + results["emissions_opt__battery_discharge_kWh"]
         )
         - results["emissions_opt__runofriver_profit_rp"]
+        + results["emissions_opt__woodchip_cost_rp"]
+        - results["emissions_opt__thermal_revenue_rp"]
         + results["emissions_opt__monthly_power_tariff_rp"]
         + results["emissions_opt__battery_fixed_cost_rp"]
     )
@@ -164,12 +204,14 @@ def build_results_table(
         results["cost_opt__grid_import_kWh"] * grid_emissions
         + results["cost_opt__grid_export_kWh"] * export_emissions
         + production_series * runofriver_emissions_per_kwh
+        + cost_woodchip_heat_series * woodchip_emissions_per_kwhth
     )
 
     results["emissions_opt__step_emissions_kgco2"] = (
         results["emissions_opt__grid_import_kWh"] * grid_emissions
         + results["emissions_opt__grid_export_kWh"] * export_emissions
         + production_series * runofriver_emissions_per_kwh
+        + emis_woodchip_heat_series * woodchip_emissions_per_kwhth
     )
 
     return results
@@ -178,11 +220,12 @@ def build_results_table(
 def summarize_solution(
     solution,
     production,
+    heatdemand,
     spot_price,
     monthly_peak,
 ):
     battery_capacity_kwh = BATTERY_TECHNICAL["capacity_kwh"]
-    battery_capex = BATTERY_ECONOMIC["capex_rp_kwh"] * battery_capacity_kwh
+    battery_capex = BATTERY_ECONOMIC["annual_capex_rp_per_kwh_amortized"] * battery_capacity_kwh
     battery_annual_opex = (
         BATTERY_ECONOMIC["annual_opex_rp_per_kwh_year"] * battery_capacity_kwh
     )
@@ -191,6 +234,9 @@ def summarize_solution(
     export_emissions = EXPORT_EMISSIONS["export_emissions_kgco2_per_kwh"]
     runofriver_profit_per_kwh = RUNOFRIVER_ECONOMIC["profit_rp_per_kwh"]
     runofriver_emissions_per_kwh = RUNOFRIVER_EMISSIONS["emissions_kgco2eq_per_kwh_generated"]
+    woodchip_cost_per_kwhth = WOODCHIP_BOILER_ECONOMIC["cost_rp_per_kwhth_useful"]
+    thermal_revenue_per_kwhth = GRID_THERMAL_ECONOMIC["revenue_rp_per_kwhth_sold"]
+    woodchip_emissions_per_kwhth = WOODCHIP_BOILER_EMISSIONS["emissions_kgco2eq_per_kwhth"]
 
     spot_price_series = pd.Series(spot_price, dtype=float)
     production_series = pd.Series(production, dtype=float)
@@ -220,30 +266,41 @@ def summarize_solution(
             * export_price_rp_per_kwh(spot_price_series, annual_grid_use_h)
         ).sum()
     )
+    if "woodchip_boiler_heat_kWhth" in solution:
+        annual_woodchip_heat_kwhth = float(solution["woodchip_boiler_heat_kWhth"].sum())
+    else:
+        annual_woodchip_heat_kwhth = 0.0
+    annual_woodchip_cost_rp = annual_woodchip_heat_kwhth * woodchip_cost_per_kwhth
+    annual_thermal_revenue_rp = float(pd.Series(heatdemand, dtype=float).sum()) * thermal_revenue_per_kwhth
     annual_cost_burden_rp = (
         annual_import_cost_rp
         - annual_export_revenue_rp
         + annual_battery_degradation_rp
         - annual_runofriver_profit_rp
+        + annual_woodchip_cost_rp
+        - annual_thermal_revenue_rp
         + annual_power_cost_rp
         + annual_battery_fixed_cost_rp
     )
+    net_annual_profit_chf = -annual_cost_burden_rp / 100.0
     annual_emissions_burden_kgco2 = float(
         annual_import_kwh * grid_emissions
         + annual_export_kwh * export_emissions
         + production_series.sum() * runofriver_emissions_per_kwh
+        + annual_woodchip_heat_kwhth * woodchip_emissions_per_kwhth
     )
 
     return {
         "battery_installed": battery_installed,
-        "annual_cost_burden_rp": annual_cost_burden_rp,
-        "net_annual_profit_chf": -annual_cost_burden_rp / 100.0,
+        "net_annual_profit_chf": net_annual_profit_chf,
         "annual_emissions_burden_kgco2": annual_emissions_burden_kgco2,
         "annual_grid_import_kwh": annual_import_kwh,
         "annual_grid_export_kwh": annual_export_kwh,
         "annual_grid_use_h": annual_grid_use_h,
         "annual_battery_charge_kwh": float(solution["battery_charge_kWh"].sum()),
         "annual_battery_discharge_kwh": float(solution["battery_discharge_kWh"].sum()),
+        "annual_woodchip_heat_kwhth": annual_woodchip_heat_kwhth,
+        "annual_thermal_revenue_chf": annual_thermal_revenue_rp / 100.0,
     }
 
 

@@ -4,6 +4,7 @@ import pandas as pd
 
 from constraints.battery import add_battery_constraints
 from constraints.energy_balance import add_energy_balance_constraints
+from constraints.heat_balance import add_heat_balance_constraints
 from objective import add_objective, build_annual_emissions_expr
 from parameters.general import GENERAL
 from variables import add_variables
@@ -12,6 +13,7 @@ from variables import add_variables
 def build_model(
     production_kwh,
     demand_kwh,
+    heatdemand_kwhth,
     spot_price_rp_per_kwh,
     datetime_series,
     objective_mode,
@@ -38,6 +40,13 @@ def build_model(
         vars_dict=vars_dict,
         production_kwh=production_kwh,
         demand_kwh=demand_kwh,
+        n=n,
+    )
+
+    add_heat_balance_constraints(
+        model=model,
+        vars_dict=vars_dict,
+        heatdemand_kwhth=heatdemand_kwhth,
         n=n,
     )
 
@@ -78,6 +87,7 @@ def build_model(
         model=model,
         vars_dict=vars_dict,
         production_kwh=production_kwh,
+        heatdemand_kwhth=heatdemand_kwhth,
         spot_price_rp_per_kwh=spot_price_rp_per_kwh,
         objective_mode=objective_mode,
         n=n,

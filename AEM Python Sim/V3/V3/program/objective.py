@@ -5,20 +5,25 @@ from parameters.battery import BATTERY_ECONOMIC, BATTERY_TECHNICAL
 from parameters.grid_import import IMPORT_ECONOMIC, IMPORT_EMISSIONS
 from parameters.general import GENERAL
 from parameters.grid_export import EXPORT_ECONOMIC, EXPORT_EMISSIONS, EXPORT_TECHNICAL
+from parameters.grid_thermal import GRID_THERMAL_ECONOMIC
 from parameters.runofriver import RUNOFRIVER_ECONOMIC, RUNOFRIVER_EMISSIONS
+from parameters.woodchip_boiler import WOODCHIP_BOILER_ECONOMIC, WOODCHIP_BOILER_EMISSIONS
 
 
 def build_annual_emissions_expr(vars_dict, production_kwh, n):
     grid_import = vars_dict["grid_import"]
     grid_export = vars_dict["grid_export"]
+    woodchip_heat = vars_dict["woodchip_boiler_heat_kWhth"]
     grid_emissions = IMPORT_EMISSIONS["grid_emissions_kgco2_per_kwh"]
     export_emissions = EXPORT_EMISSIONS["export_emissions_kgco2_per_kwh"]
     runofriver_emissions_per_kwh = RUNOFRIVER_EMISSIONS["emissions_kgco2eq_per_kwh_generated"]
+    woodchip_emissions_per_kwhth = WOODCHIP_BOILER_EMISSIONS["emissions_kgco2eq_per_kwhth"]
 
     return gp.quicksum(
         grid_import[t] * grid_emissions
         + grid_export[t] * export_emissions
         + production_kwh[t] * runofriver_emissions_per_kwh
+        + woodchip_heat[t] * woodchip_emissions_per_kwhth
         for t in range(n)
     )
 
@@ -27,12 +32,14 @@ def add_objective(
     model,
     vars_dict,
     production_kwh,
+    heatdemand_kwhth,
     spot_price_rp_per_kwh,
     objective_mode,
     n,
 ):
     grid_import = vars_dict["grid_import"]
     grid_export = vars_dict["grid_export"]
+    woodchip_heat = vars_dict["woodchip_boiler_heat_kWhth"]
     batt_charge = vars_dict["batt_charge"]
     batt_discharge = vars_dict["batt_discharge"]
     battery_installed = vars_dict["battery_installed"]
@@ -40,7 +47,7 @@ def add_objective(
     unique_month_labels = vars_dict["unique_month_labels"]
 
     battery_capacity_kwh = BATTERY_TECHNICAL["capacity_kwh"]
-    battery_capex = BATTERY_ECONOMIC["capex_rp_kwh"] * battery_capacity_kwh
+    battery_capex = BATTERY_ECONOMIC["annual_capex_rp_per_kwh_amortized"] * battery_capacity_kwh
     battery_annual_opex = (
         BATTERY_ECONOMIC["annual_opex_rp_per_kwh_year"] * battery_capacity_kwh
     )
@@ -49,6 +56,8 @@ def add_objective(
     export_emissions = EXPORT_EMISSIONS["export_emissions_kgco2_per_kwh"]
     runofriver_profit_per_kwh = RUNOFRIVER_ECONOMIC["profit_rp_per_kwh"]
     runofriver_emissions_per_kwh = RUNOFRIVER_EMISSIONS["emissions_kgco2eq_per_kwh_generated"]
+    woodchip_cost_per_kwhth = WOODCHIP_BOILER_ECONOMIC["cost_rp_per_kwhth_useful"]
+    thermal_revenue_per_kwhth = GRID_THERMAL_ECONOMIC["revenue_rp_per_kwhth_sold"]
     import_high_use_tariff = IMPORT_ECONOMIC["fixed_tariff_high_grid_use_rp_per_kwh"]
     import_low_use_tariff = IMPORT_ECONOMIC["fixed_tariff_low_grid_use_rp_per_kwh"]
     export_high_use_tariff = EXPORT_ECONOMIC["fixed_tariff_high_grid_use_rp_per_kwh"]
@@ -101,6 +110,12 @@ def add_objective(
             + (production_kwh[t] - prod_for_local[t]) * (spot_price_rp_per_kwh[t] - export_high_use_tariff)
             for t in range(n)
         )
+        woodchip_net_cost = gp.quicksum(
+            woodchip_heat[t] * woodchip_cost_per_kwhth for t in range(n)
+        )
+        thermal_revenue = gp.quicksum(
+            heatdemand_kwhth[t] * thermal_revenue_per_kwhth for t in range(n)
+        )
         
         expr = gp.quicksum(
             grid_import[t] * (spot_price_rp_per_kwh[t] + import_high_use_tariff)
@@ -114,7 +129,7 @@ def add_objective(
             + (power_tariff_low_use - power_tariff_high_use) * export_low_grid_use
         ) * gp.quicksum(
             monthly_peak_kw[month_label] for month_label in unique_month_labels
-        ) + battery_installed * (battery_capex + battery_annual_opex) - production_revenue
+        ) + battery_installed * (battery_capex + battery_annual_opex) - production_revenue + woodchip_net_cost - thermal_revenue
     elif objective_mode == "emissions":
         expr = build_annual_emissions_expr(vars_dict, production_kwh, n)
     else:

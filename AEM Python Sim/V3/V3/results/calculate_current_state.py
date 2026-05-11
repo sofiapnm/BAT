@@ -19,6 +19,8 @@ from parameters.runofriver import RUNOFRIVER_ECONOMIC, RUNOFRIVER_EMISSIONS
 from parameters.grid_export import EXPORT_EMISSIONS, export_price_rp_per_kwh
 from parameters.grid_import import IMPORT_EMISSIONS
 from parameters.general import GENERAL
+from parameters.grid_thermal import GRID_THERMAL_ECONOMIC
+from parameters.woodchip_boiler import WOODCHIP_BOILER_ECONOMIC, WOODCHIP_BOILER_EMISSIONS
 
 
 def calculate_current_state(
@@ -39,11 +41,15 @@ def calculate_current_state(
     
     production_kwh = kwh_df["production_kWh"].values
     load_kwh = kwh_df["load_kWh"].values
+    heatdemand_kwhth = kwh_df["heatdemand_kWhth"].values
     spot_price_rp_per_kwh = kwh_df["spot price [Rp/kWh]"].values
     
     # Get parameters
     runofriver_profit_rp_per_kwh = RUNOFRIVER_ECONOMIC["profit_rp_per_kwh"]
     runofriver_emissions_per_kwh = RUNOFRIVER_EMISSIONS["emissions_kgco2eq_per_kwh_generated"]
+    woodchip_cost_rp_per_kwhth = WOODCHIP_BOILER_ECONOMIC["cost_rp_per_kwhth_useful"]
+    thermal_revenue_rp_per_kwhth = GRID_THERMAL_ECONOMIC["revenue_rp_per_kwhth_sold"]
+    woodchip_emissions_per_kwhth = WOODCHIP_BOILER_EMISSIONS["emissions_kgco2eq_per_kwhth"]
     grid_emissions_per_kwh = IMPORT_EMISSIONS["grid_emissions_kgco2_per_kwh"]
     export_emissions_per_kwh = EXPORT_EMISSIONS["export_emissions_kgco2_per_kwh"]
     
@@ -93,6 +99,9 @@ def calculate_current_state(
     
     # Calculate revenues
     annual_runofriver_profit_rp = float((prod_for_local_kwh * runofriver_profit_rp_per_kwh).sum())
+    annual_woodchip_heat_kwhth = float(pd.Series(heatdemand_kwhth).sum())
+    annual_woodchip_cost_rp = annual_woodchip_heat_kwhth * woodchip_cost_rp_per_kwhth
+    annual_thermal_revenue_rp = annual_woodchip_heat_kwhth * thermal_revenue_rp_per_kwhth
     
     # Grid import cost: spot price + import tariff
     from parameters.grid_import import import_price_rp_per_kwh
@@ -112,7 +121,14 @@ def calculate_current_state(
     annual_export_revenue_rp = float((grid_export_kwh * export_price_series).sum())
     
     # Total cost burden = import cost - export revenue - runofriver profit
-    annual_cost_burden_rp = annual_import_cost_rp - annual_export_revenue_rp - annual_runofriver_profit_rp
+    #                   + woodchip heat production cost - woodchip heat sales revenue
+    annual_cost_burden_rp = (
+        annual_import_cost_rp
+        - annual_export_revenue_rp
+        - annual_runofriver_profit_rp
+        + annual_woodchip_cost_rp
+        - annual_thermal_revenue_rp
+    )
     annual_cost_burden_chf = annual_cost_burden_rp / 100.0
     
     # Net annual profit (inverse of cost burden)
@@ -122,10 +138,12 @@ def calculate_current_state(
     annual_import_emissions_kgco2 = float((grid_import_kwh * grid_emissions_per_kwh).sum())
     annual_export_emissions_kgco2 = float((grid_export_kwh * export_emissions_per_kwh).sum())
     annual_runofriver_emissions_kgco2 = annual_production_kwh * runofriver_emissions_per_kwh
+    annual_woodchip_emissions_kgco2 = annual_woodchip_heat_kwhth * woodchip_emissions_per_kwhth
     annual_emissions_burden_kgco2 = (
         annual_import_emissions_kgco2
         + annual_export_emissions_kgco2
         + annual_runofriver_emissions_kgco2
+        + annual_woodchip_emissions_kgco2
     )
     
     # Power tariff cost (current state has no battery, so no monthly peak charges)
@@ -139,7 +157,6 @@ def calculate_current_state(
     
     # Create current state dataframe
     current_state_data = {
-        'annual_cost_burden_chf': [annual_cost_burden_chf],
         'net_annual_profit_chf': [net_annual_profit_chf],
         'annual_import_emissions_kgco2': [annual_import_emissions_kgco2],
         'annual_export_emissions_kgco2': [annual_export_emissions_kgco2],
@@ -149,10 +166,14 @@ def calculate_current_state(
         'annual_grid_export_kwh': [annual_grid_export_kwh],
         'annual_grid_use_h': [annual_grid_use_h],
         'annual_production_kwh': [annual_production_kwh],
+        'annual_woodchip_heat_kwhth': [annual_woodchip_heat_kwhth],
         'annual_import_cost_chf': [annual_import_cost_rp / 100.0],
         'annual_export_revenue_chf': [annual_export_revenue_rp / 100.0],
         'annual_runofriver_profit_chf': [annual_runofriver_profit_rp / 100.0],
+        'annual_woodchip_cost_chf': [annual_woodchip_cost_rp / 100.0],
+        'annual_thermal_revenue_chf': [annual_thermal_revenue_rp / 100.0],
         'annual_power_cost_chf': [annual_power_cost_chf],
+        'annual_woodchip_emissions_kgco2': [annual_woodchip_emissions_kgco2],
         'power_tariff_chf_per_kw_per_month': [power_tariff_chf_per_kw_per_month],
         'interval_count': [len(kwh_df)],
     }
@@ -178,13 +199,15 @@ def calculate_current_state(
     print(f"Annual Import Cost: {annual_import_cost_rp / 100.0:,.2f} CHF")
     print(f"Annual Export Revenue: {annual_export_revenue_rp / 100.0:,.2f} CHF")
     print(f"Annual Run-of-River Profit: {annual_runofriver_profit_rp / 100.0:,.2f} CHF")
+    print(f"Annual Woodchip Cost: {annual_woodchip_cost_rp / 100.0:,.2f} CHF")
+    print(f"Annual Thermal Revenue: {annual_thermal_revenue_rp / 100.0:,.2f} CHF")
     print()
-    print(f"Annual Cost Burden: {annual_cost_burden_chf:,.2f} CHF")
     print(f"Net Annual Profit: {net_annual_profit_chf:,.2f} CHF")
     print()
     print(f"Annual Import Emissions: {annual_import_emissions_kgco2:,.2f} kgCO2")
     print(f"Annual Export Emissions: {annual_export_emissions_kgco2:,.2f} kgCO2")
     print(f"Annual Run-of-River Emissions: {annual_runofriver_emissions_kgco2:,.2f} kgCO2")
+    print(f"Annual Woodchip Emissions: {annual_woodchip_emissions_kgco2:,.2f} kgCO2")
     print(f"Annual Emissions Burden: {annual_emissions_burden_kgco2:,.2f} kgCO2")
     print()
     print(f"Saved to: {output_path}")

@@ -17,6 +17,6 @@ GENERAL = {
     "delta_t_h": 0.25,   # 15 minutes
     "solver_name": "gurobi",
     "gurobi_output_flag": 0,
-    "pareto_num_points": 21,
+    "pareto_num_points": 5,
     "emissions_penalty": 0.0, #120 CHF/ton CO2eq. for thermal fuels, need to find renewable elec generation tax (if any)
 }
