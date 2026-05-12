@@ -16,11 +16,13 @@ from parameters.grid_export import (
 from parameters.heat_pump import HEAT_PUMP_TECHNICAL, HEAT_PUMP_ECONOMIC, HEAT_PUMP_EMISSIONS
 from parameters.runofriver import RUNOFRIVER_ECONOMIC, RUNOFRIVER_EMISSIONS
 from parameters.woodchip_boiler import WOODCHIP_BOILER_ECONOMIC, WOODCHIP_BOILER_EMISSIONS
+from parameters.ptes import PTES_TECHNICAL, PTES_ECONOMIC, PTES_EMISSIONS
 
 
 def extract_solution(vars_dict, n):
     battery_installed = float(vars_dict["battery_installed"].X)
     heatpump_nominal = float(vars_dict["heatpump_nominal_kWhth"].X)
+    ptes_volume = float(vars_dict["ptes_volume_m3"].X)
     heatpump_on_vals = (
         [vars_dict["heatpump_on"][t].X for t in range(n)]
         if "heatpump_on" in vars_dict
@@ -42,6 +44,10 @@ def extract_solution(vars_dict, n):
             "heatpump_nominal_kWhth": [heatpump_nominal for _ in range(n)],
             "Q_HP_kWhth": [vars_dict["heatpump_heat_kWhth"][t].X for t in range(n)],
             "E_elec_HP_kWh": [vars_dict["heatpump_elec_kWh"][t].X for t in range(n)],
+            "ptes_charge_kWhth": [vars_dict["ptes_charge_kWhth"][t].X for t in range(n)],
+            "ptes_discharge_kWhth": [vars_dict["ptes_discharge_kWhth"][t].X for t in range(n)],
+            "ptes_soc_kWhth": [vars_dict["ptes_soc_kWhth"][t].X for t in range(n)],
+            "ptes_volume_m3": [ptes_volume for _ in range(n)],
         }
     )
 
@@ -89,6 +95,9 @@ def build_kwh_results_table(
     )
     results["heatpump_heat_supply_share"] = (
         results["heatpump_heat_kWhth"].div(heatdemand_nonzero).fillna(0.0)
+    )
+    results["ptes_discharge_supply_share"] = (
+        results["ptes_discharge_kWhth"].div(heatdemand_nonzero).fillna(0.0)
     )
 
     return results
@@ -186,6 +195,10 @@ def build_results_table(
     results["emissions_opt__battery_fixed_cost_rp"] = 0.0
     results["cost_opt__heatpump_fixed_cost_rp"] = 0.0
     results["emissions_opt__heatpump_fixed_cost_rp"] = 0.0
+    results["cost_opt__ptes_fixed_cost_rp"] = 0.0
+    results["emissions_opt__ptes_fixed_cost_rp"] = 0.0
+    results["cost_opt__ptes_emissions_kgco2"] = 0.0
+    results["emissions_opt__ptes_emissions_kgco2"] = 0.0
     results["cost_opt__heatpump_emissions_kgco2"] = 0.0
     results["emissions_opt__heatpump_emissions_kgco2"] = 0.0
     results["cost_opt__woodchip_cost_rp"] = (
@@ -199,6 +212,15 @@ def build_results_table(
     results["cost_opt__heatpump_emissions_kgco2"] = (
         cost_heatpump_heat_series * HEAT_PUMP_EMISSIONS["emissions_kgco2eq_per_kwhth"]
     )
+    results["cost_opt__ptes_charge_kWhth"] = pd.Series(
+        sol_cost["ptes_charge_kWhth"], index=results.index, dtype=float
+    ) if "ptes_charge_kWhth" in sol_cost else pd.Series(0.0, index=results.index, dtype=float)
+    results["cost_opt__ptes_discharge_kWhth"] = pd.Series(
+        sol_cost["ptes_discharge_kWhth"], index=results.index, dtype=float
+    ) if "ptes_discharge_kWhth" in sol_cost else pd.Series(0.0, index=results.index, dtype=float)
+    results["cost_opt__ptes_soc_kWhth"] = pd.Series(
+        sol_cost["ptes_soc_kWhth"], index=results.index, dtype=float
+    ) if "ptes_soc_kWhth" in sol_cost else pd.Series(0.0, index=results.index, dtype=float)
     results["cost_opt__woodchip_heat_supply_share"] = (
         results["cost_opt__woodchip_boiler_heat_kWhth"]
         .div(results["heatdemand_kWhth"].replace(0.0, pd.NA))
@@ -206,6 +228,11 @@ def build_results_table(
     )
     results["cost_opt__heatpump_heat_supply_share"] = (
         results["cost_opt__heatpump_heat_kWhth"]
+        .div(results["heatdemand_kWhth"].replace(0.0, pd.NA))
+        .fillna(0.0)
+    )
+    results["cost_opt__ptes_discharge_supply_share"] = (
+        results["cost_opt__ptes_discharge_kWhth"]
         .div(results["heatdemand_kWhth"].replace(0.0, pd.NA))
         .fillna(0.0)
     )
@@ -221,6 +248,15 @@ def build_results_table(
     results["emissions_opt__heatpump_emissions_kgco2"] = (
         emis_heatpump_heat_series * HEAT_PUMP_EMISSIONS["emissions_kgco2eq_per_kwhth"]
     )
+    results["emissions_opt__ptes_charge_kWhth"] = pd.Series(
+        sol_emis["ptes_charge_kWhth"], index=results.index, dtype=float
+    ) if "ptes_charge_kWhth" in sol_emis else pd.Series(0.0, index=results.index, dtype=float)
+    results["emissions_opt__ptes_discharge_kWhth"] = pd.Series(
+        sol_emis["ptes_discharge_kWhth"], index=results.index, dtype=float
+    ) if "ptes_discharge_kWhth" in sol_emis else pd.Series(0.0, index=results.index, dtype=float)
+    results["emissions_opt__ptes_soc_kWhth"] = pd.Series(
+        sol_emis["ptes_soc_kWhth"], index=results.index, dtype=float
+    ) if "ptes_soc_kWhth" in sol_emis else pd.Series(0.0, index=results.index, dtype=float)
     results["emissions_opt__woodchip_heat_supply_share"] = (
         results["emissions_opt__woodchip_boiler_heat_kWhth"]
         .div(results["heatdemand_kWhth"].replace(0.0, pd.NA))
@@ -228,6 +264,11 @@ def build_results_table(
     )
     results["emissions_opt__heatpump_heat_supply_share"] = (
         results["emissions_opt__heatpump_heat_kWhth"]
+        .div(results["heatdemand_kWhth"].replace(0.0, pd.NA))
+        .fillna(0.0)
+    )
+    results["emissions_opt__ptes_discharge_supply_share"] = (
+        results["emissions_opt__ptes_discharge_kWhth"]
         .div(results["heatdemand_kWhth"].replace(0.0, pd.NA))
         .fillna(0.0)
     )
@@ -250,6 +291,27 @@ def build_results_table(
         )
         results.loc[results.index[0], "cost_opt__heatpump_fixed_cost_rp"] = heatpump_fixed_cost_rp
         results.loc[results.index[0], "emissions_opt__heatpump_fixed_cost_rp"] = heatpump_fixed_cost_rp
+        
+        # PTES costs and emissions
+        ptes_volume_cost = float(sol_cost["ptes_volume_m3"].iloc[0]) if "ptes_volume_m3" in sol_cost else 0.0
+        ptes_volume_emis = float(sol_emis["ptes_volume_m3"].iloc[0]) if "ptes_volume_m3" in sol_emis else 0.0
+        # Compute PTES cost using the cost function (annualized over 30 years)
+        if ptes_volume_cost > 0:
+            ptes_cost_rp_cost = PTES_ECONOMIC["cost_rp_per_year_factor"] * (ptes_volume_cost ** PTES_ECONOMIC["cost_chf_exp"])
+        else:
+            ptes_cost_rp_cost = 0.0
+        if ptes_volume_emis > 0:
+            ptes_cost_rp_emis = PTES_ECONOMIC["cost_rp_per_year_factor"] * (ptes_volume_emis ** PTES_ECONOMIC["cost_chf_exp"])
+        else:
+            ptes_cost_rp_emis = 0.0
+        # PTES emissions: embodied carbon per m³ per year
+        ptes_emissions_cost = ptes_volume_cost * PTES_EMISSIONS["emissions_kgco2eq_per_m3"]
+        ptes_emissions_emis = ptes_volume_emis * PTES_EMISSIONS["emissions_kgco2eq_per_m3"]
+        
+        results.loc[results.index[0], "cost_opt__ptes_fixed_cost_rp"] = ptes_cost_rp_cost
+        results.loc[results.index[0], "emissions_opt__ptes_fixed_cost_rp"] = ptes_cost_rp_emis
+        results.loc[results.index[0], "cost_opt__ptes_emissions_kgco2"] = ptes_emissions_cost
+        results.loc[results.index[0], "emissions_opt__ptes_emissions_kgco2"] = ptes_emissions_emis
 
     results["cost_opt__step_cost_rp"] = (
         results["cost_opt__grid_import_kWh"]
@@ -267,6 +329,7 @@ def build_results_table(
         + results["cost_opt__monthly_power_tariff_rp"]
         + results["cost_opt__battery_fixed_cost_rp"]
         + results["cost_opt__heatpump_fixed_cost_rp"]
+        + results["cost_opt__ptes_fixed_cost_rp"]
     )
 
     results["emissions_opt__step_cost_rp"] = (
@@ -284,6 +347,7 @@ def build_results_table(
         - results["emissions_opt__thermal_revenue_rp"]
         + results["emissions_opt__monthly_power_tariff_rp"]
         + results["emissions_opt__battery_fixed_cost_rp"]
+        + results["emissions_opt__ptes_fixed_cost_rp"]
     )
 
     results["cost_opt__step_emissions_kgco2"] = (
@@ -292,6 +356,7 @@ def build_results_table(
         + production_series * runofriver_emissions_per_kwh
         + cost_woodchip_heat_series * woodchip_emissions_per_kwhth
         + results["cost_opt__heatpump_emissions_kgco2"]
+        + results["cost_opt__ptes_emissions_kgco2"]
     )
 
     results["emissions_opt__step_emissions_kgco2"] = (
@@ -300,6 +365,7 @@ def build_results_table(
         + production_series * runofriver_emissions_per_kwh
         + emis_woodchip_heat_series * woodchip_emissions_per_kwhth
         + results["emissions_opt__heatpump_emissions_kgco2"]
+        + results["emissions_opt__ptes_emissions_kgco2"]
     )
 
     return results

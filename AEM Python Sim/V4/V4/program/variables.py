@@ -2,6 +2,7 @@ from gurobipy import GRB
 
 from parameters.battery import BATTERY_MODE, BATTERY_TECHNICAL
 from parameters.heat_pump import HEAT_PUMP_TECHNICAL
+from parameters.ptes import PTES_TECHNICAL
 
 
 def add_variables(model, n):
@@ -76,6 +77,25 @@ def add_variables(model, n):
     # Heat pump nominal thermal capacity [kWh_th per timestep]
     vars_dict["heatpump_nominal_kWhth"] = model.addVar(
         lb=0.0, vtype=GRB.CONTINUOUS, name="heatpump_nominal_kWhth"
+    )
+
+    # PTES (Pit Thermal Energy Storage) variables [kWh_th]
+    vars_dict["ptes_charge_kWhth"] = model.addVars(
+        n, lb=0.0, vtype=GRB.CONTINUOUS, name="ptes_charge_kWhth"
+    )
+
+    vars_dict["ptes_discharge_kWhth"] = model.addVars(
+        n, lb=0.0, vtype=GRB.CONTINUOUS, name="ptes_discharge_kWhth"
+    )
+
+    # PTES state of charge [kWh_th]
+    vars_dict["ptes_soc_kWhth"] = model.addVars(
+        n, lb=0.0, vtype=GRB.CONTINUOUS, name="ptes_soc_kWhth"
+    )
+
+    # PTES storage volume sizing variable [m³]
+    vars_dict["ptes_volume_m3"] = model.addVar(
+        lb=0.0, vtype=GRB.CONTINUOUS, name="ptes_volume_m3"
     )
 
     return vars_dict

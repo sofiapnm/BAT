@@ -8,16 +8,62 @@ from parameters.grid_export import EXPORT_ECONOMIC, EXPORT_EMISSIONS, EXPORT_TEC
 from parameters.heat_pump import HEAT_PUMP_ECONOMIC, HEAT_PUMP_EMISSIONS
 from parameters.runofriver import RUNOFRIVER_ECONOMIC, RUNOFRIVER_EMISSIONS
 from parameters.woodchip_boiler import WOODCHIP_BOILER_ECONOMIC, WOODCHIP_BOILER_EMISSIONS
+from parameters.ptes import PTES_TECHNICAL, PTES_ECONOMIC, PTES_EMISSIONS
+
+
+def add_ptes_cost_constraint(model, ptes_volume, ptes_cost_var):
+    """
+    Add piecewise linear constraint for PTES cost function.
+    Cost = (838668.4 * V^(-0.424)) / 30 [rappen/year]
+    
+    Uses SOS2 (Special Ordered Set type 2) for piecewise linear interpolation.
+    """
+    # Volume breakpoints (m³)
+    v_breakpoints = [0.1, 10, 50, 100, 200, 500, 1000, 2000, 5000]
+    
+    # Compute corresponding costs (rappen/year, annualized)
+    def ptes_annual_cost_rp(v):
+        if v <= 0:
+            return 0
+        return PTES_ECONOMIC["cost_rp_per_year_factor"] * (v ** PTES_ECONOMIC["cost_chf_exp"])
+    
+    costs = [ptes_annual_cost_rp(v) for v in v_breakpoints]
+    
+    # Create weight variables for piecewise linear interpolation
+    weights = model.addVars(len(v_breakpoints), lb=0, ub=1, vtype=GRB.CONTINUOUS, name="ptes_cost_weights")
+    
+    # Constraint: volume is linear combination of breakpoints
+    model.addConstr(
+        ptes_volume == gp.quicksum(weights[i] * v_breakpoints[i] for i in range(len(v_breakpoints))),
+        name="ptes_volume_interp"
+    )
+    
+    # Constraint: cost is linear combination of costs at breakpoints
+    model.addConstr(
+        ptes_cost_var == gp.quicksum(weights[i] * costs[i] for i in range(len(v_breakpoints))),
+        name="ptes_cost_interp"
+    )
+    
+    # SOS2 constraint: at most two adjacent weights can be non-zero (enforces piecewise linear interpolation)
+    model.addSOS(GRB.SOS_TYPE2, [weights[i] for i in range(len(v_breakpoints))])
+    
+    # Constraint: weights sum to 1
+    model.addConstr(
+        gp.quicksum(weights) == 1,
+        name="ptes_weights_sum"
+    )
 
 
 def build_annual_emissions_expr(vars_dict, production_kwh, n):
     grid_import = vars_dict["grid_import"]
     grid_export = vars_dict["grid_export"]
     woodchip_heat = vars_dict["woodchip_boiler_heat_kWhth"]
+    ptes_volume = vars_dict["ptes_volume_m3"]
     grid_emissions = IMPORT_EMISSIONS["grid_emissions_kgco2_per_kwh"]
     export_emissions = EXPORT_EMISSIONS["export_emissions_kgco2_per_kwh"]
     runofriver_emissions_per_kwh = RUNOFRIVER_EMISSIONS["emissions_kgco2eq_per_kwh_generated"]
     woodchip_emissions_per_kwhth = WOODCHIP_BOILER_EMISSIONS["emissions_kgco2eq_per_kwhth"]
+    ptes_emissions_per_m3 = PTES_EMISSIONS["emissions_kgco2eq_per_m3"]
 
     return gp.quicksum(
         grid_import[t] * grid_emissions
@@ -25,7 +71,8 @@ def build_annual_emissions_expr(vars_dict, production_kwh, n):
         + production_kwh[t] * runofriver_emissions_per_kwh
         + woodchip_heat[t] * woodchip_emissions_per_kwhth
         for t in range(n)
-    )
+    ) + ptes_volume * ptes_emissions_per_m3  # Annual PTES embodied emissions
+
 
 
 def add_objective(
@@ -42,6 +89,7 @@ def add_objective(
     woodchip_heat = vars_dict["woodchip_boiler_heat_kWhth"]
     heatpump_heat = vars_dict["heatpump_heat_kWhth"]
     heatpump_nominal = vars_dict["heatpump_nominal_kWhth"]
+    ptes_volume = vars_dict["ptes_volume_m3"]
     batt_charge = vars_dict["batt_charge"]
     batt_discharge = vars_dict["batt_discharge"]
     battery_installed = vars_dict["battery_installed"]
@@ -83,6 +131,10 @@ def add_objective(
     )
 
     if objective_mode == "cost": # - : profit , + = cost
+        # Add PTES cost variable and constraint
+        ptes_cost_var = model.addVar(lb=0.0, vtype=GRB.CONTINUOUS, name="ptes_annual_cost_rp")
+        add_ptes_cost_constraint(model, ptes_volume, ptes_cost_var)
+        
         annual_grid_use_kwh = gp.quicksum(
             grid_import[t] + grid_export[t] for t in range(n)
         )
@@ -134,7 +186,7 @@ def add_objective(
             + (power_tariff_low_use - power_tariff_high_use) * export_low_grid_use
         ) * gp.quicksum(
             monthly_peak_kw[month_label] for month_label in unique_month_labels
-        ) + battery_installed * (battery_capex + battery_annual_opex) + heatpump_fixed_cost_rp - production_revenue + woodchip_net_cost - thermal_revenue
+        ) + battery_installed * (battery_capex + battery_annual_opex) + heatpump_fixed_cost_rp + ptes_cost_var - production_revenue + woodchip_net_cost - thermal_revenue
     elif objective_mode == "emissions":
         expr = build_annual_emissions_expr(vars_dict, production_kwh, n) + gp.quicksum(
             heatpump_heat[t] * heatpump_emissions_per_kwhth for t in range(n)
