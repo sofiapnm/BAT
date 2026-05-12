@@ -1,6 +1,7 @@
 from gurobipy import GRB
 
 from parameters.battery import BATTERY_MODE, BATTERY_TECHNICAL
+from parameters.heat_pump import HEAT_PUMP_TECHNICAL
 
 
 def add_variables(model, n):
@@ -65,6 +66,12 @@ def add_variables(model, n):
     vars_dict["heatpump_elec_kWh"] = model.addVars(
         n, lb=0.0, vtype=GRB.CONTINUOUS, name="heatpump_elec_kWh"
     )
+
+    if HEAT_PUMP_TECHNICAL.get("enforce_modulation_binary", False):
+        # Heat pump on/off state (used to enforce exact modulation limits)
+        vars_dict["heatpump_on"] = model.addVars(
+            n, vtype=GRB.BINARY, name="heatpump_on"
+        )
 
     # Heat pump nominal thermal capacity [kWh_th per timestep]
     vars_dict["heatpump_nominal_kWhth"] = model.addVar(

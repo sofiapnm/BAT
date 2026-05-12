@@ -13,7 +13,7 @@ from parameters.grid_export import (
     EXPORT_EMISSIONS,
     export_price_rp_per_kwh,
 )
-from parameters.heat_pump import HEAT_PUMP_ECONOMIC, HEAT_PUMP_EMISSIONS
+from parameters.heat_pump import HEAT_PUMP_TECHNICAL, HEAT_PUMP_ECONOMIC, HEAT_PUMP_EMISSIONS
 from parameters.runofriver import RUNOFRIVER_ECONOMIC, RUNOFRIVER_EMISSIONS
 from parameters.woodchip_boiler import WOODCHIP_BOILER_ECONOMIC, WOODCHIP_BOILER_EMISSIONS
 
@@ -21,6 +21,11 @@ from parameters.woodchip_boiler import WOODCHIP_BOILER_ECONOMIC, WOODCHIP_BOILER
 def extract_solution(vars_dict, n):
     battery_installed = float(vars_dict["battery_installed"].X)
     heatpump_nominal = float(vars_dict["heatpump_nominal_kWhth"].X)
+    heatpump_on_vals = (
+        [vars_dict["heatpump_on"][t].X for t in range(n)]
+        if "heatpump_on" in vars_dict
+        else [1.0 if vars_dict["heatpump_elec_kWh"][t].X > 1e-6 else 0.0 for t in range(n)]
+    )
     return pd.DataFrame(
         {
             "battery_installed": [battery_installed for _ in range(n)],
@@ -33,6 +38,7 @@ def extract_solution(vars_dict, n):
             "woodchip_boiler_heat_kWhth": [vars_dict["woodchip_boiler_heat_kWhth"][t].X for t in range(n)],
             "heatpump_heat_kWhth": [vars_dict["heatpump_heat_kWhth"][t].X for t in range(n)],
             "heatpump_elec_kWh": [vars_dict["heatpump_elec_kWh"][t].X for t in range(n)],
+            "heatpump_on": heatpump_on_vals,
             "heatpump_nominal_kWhth": [heatpump_nominal for _ in range(n)],
             "Q_HP_kWhth": [vars_dict["heatpump_heat_kWhth"][t].X for t in range(n)],
             "E_elec_HP_kWh": [vars_dict["heatpump_elec_kWh"][t].X for t in range(n)],
@@ -57,6 +63,7 @@ def build_kwh_results_table(
     spot_price_profile,
     solution,
 ):
+    from parameters.heat_pump import HEAT_PUMP_TECHNICAL
     results = pd.DataFrame({"DateTime": datetime_series})
     results["load_kWh"] = pd.Series(load_profile, index=results.index, dtype=float)
     results["heatdemand_kWhth"] = pd.Series(
@@ -66,6 +73,12 @@ def build_kwh_results_table(
     results["spot price [Rp/kWh]"] = pd.Series(
         spot_price_profile, index=results.index, dtype=float
     )
+
+    # Add monthly COP profile
+    datetime_s = pd.to_datetime(datetime_series)
+    months = datetime_s.dt.month.values
+    cop_monthly = HEAT_PUMP_TECHNICAL["cop_monthly"]
+    results["cop_monthly"] = [cop_monthly[int(m) - 1] if not pd.isna(m) else cop_monthly[0] for m in months]
 
     for col in solution.columns:
         results[col] = solution[col].values

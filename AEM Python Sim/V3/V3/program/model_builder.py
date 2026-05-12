@@ -48,6 +48,7 @@ def build_model(
         vars_dict=vars_dict,
         heatdemand_kwhth=heatdemand_kwhth,
         n=n,
+        datetime_series=datetime_series,
     )
 
     # Constrain production allocation: can only allocate to local demand what exists and what demand needs
