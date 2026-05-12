@@ -23,7 +23,7 @@ def main():
 
     model_cost, vars_cost = build_model(
         production_kwh=data["production"],
-        demand_kwh=data["demand"],
+        elecdemand_kwh=data["elecdemand_kwhel"],
         heatdemand_kwhth=data["heatdemand_kwhth"],
         spot_price_rp_per_kwh=data["spot_price"],
         datetime_series=data["datetime"],
@@ -37,7 +37,7 @@ def main():
 
     model_emis, vars_emis = build_model(
         production_kwh=data["production"],
-        demand_kwh=data["demand"],
+        elecdemand_kwh=data["elecdemand_kwhel"],
         heatdemand_kwhth=data["heatdemand_kwhth"],
         spot_price_rp_per_kwh=data["spot_price"],
         datetime_series=data["datetime"],
@@ -51,7 +51,7 @@ def main():
 
     kwh_results = build_kwh_results_table(
         datetime_series=data["datetime"],
-        load_profile=data["demand"],
+        load_profile=data["elecdemand_kwhel"],
         heatdemand_profile=data["heatdemand_kwhth"],
         production_profile=data["production"],
         spot_price_profile=data["spot_price"],

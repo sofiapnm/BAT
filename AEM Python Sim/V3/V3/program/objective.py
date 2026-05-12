@@ -5,7 +5,7 @@ from parameters.battery import BATTERY_ECONOMIC, BATTERY_TECHNICAL
 from parameters.grid_import import IMPORT_ECONOMIC, IMPORT_EMISSIONS
 from parameters.general import GENERAL
 from parameters.grid_export import EXPORT_ECONOMIC, EXPORT_EMISSIONS, EXPORT_TECHNICAL
-from parameters.grid_thermal import GRID_THERMAL_ECONOMIC
+from parameters.heat_pump import HEAT_PUMP_ECONOMIC, HEAT_PUMP_EMISSIONS
 from parameters.runofriver import RUNOFRIVER_ECONOMIC, RUNOFRIVER_EMISSIONS
 from parameters.woodchip_boiler import WOODCHIP_BOILER_ECONOMIC, WOODCHIP_BOILER_EMISSIONS
 
@@ -40,6 +40,8 @@ def add_objective(
     grid_import = vars_dict["grid_import"]
     grid_export = vars_dict["grid_export"]
     woodchip_heat = vars_dict["woodchip_boiler_heat_kWhth"]
+    heatpump_heat = vars_dict["heatpump_heat_kWhth"]
+    heatpump_nominal = vars_dict["heatpump_nominal_kWhth"]
     batt_charge = vars_dict["batt_charge"]
     batt_discharge = vars_dict["batt_discharge"]
     battery_installed = vars_dict["battery_installed"]
@@ -57,7 +59,10 @@ def add_objective(
     runofriver_profit_per_kwh = RUNOFRIVER_ECONOMIC["profit_rp_per_kwh"]
     runofriver_emissions_per_kwh = RUNOFRIVER_EMISSIONS["emissions_kgco2eq_per_kwh_generated"]
     woodchip_cost_per_kwhth = WOODCHIP_BOILER_ECONOMIC["cost_rp_per_kwhth_useful"]
-    thermal_revenue_per_kwhth = GRID_THERMAL_ECONOMIC["revenue_rp_per_kwhth_sold"]
+    thermal_revenue_per_kwhth = WOODCHIP_BOILER_ECONOMIC["revenue_rp_per_kwhth_sold"]
+    heatpump_cost_rp_per_kwth = HEAT_PUMP_ECONOMIC["cost_rp_per_kwth_nominal"]
+    heatpump_cost_rp_fixed = HEAT_PUMP_ECONOMIC["cost_rp_fixed"]
+    heatpump_emissions_per_kwhth = HEAT_PUMP_EMISSIONS["emissions_kgco2eq_per_kwhth"]
     import_high_use_tariff = IMPORT_ECONOMIC["fixed_tariff_high_grid_use_rp_per_kwh"]
     import_low_use_tariff = IMPORT_ECONOMIC["fixed_tariff_low_grid_use_rp_per_kwh"]
     export_high_use_tariff = EXPORT_ECONOMIC["fixed_tariff_high_grid_use_rp_per_kwh"]
@@ -102,9 +107,6 @@ def add_objective(
         # - prod_for_local_demand[t] gets runofriver_profit_per_kwh
         # - Excess production (production[t] - prod_for_local_demand[t]) gets export revenue
         prod_for_local = vars_dict["prod_for_local_demand"]
-        prod_for_export_or_battery = gp.quicksum(
-            production_kwh[t] - prod_for_local[t] for t in range(n)
-        )
         production_revenue = gp.quicksum(
             prod_for_local[t] * runofriver_profit_per_kwh
             + (production_kwh[t] - prod_for_local[t]) * (spot_price_rp_per_kwh[t] - export_high_use_tariff)
@@ -115,6 +117,9 @@ def add_objective(
         )
         thermal_revenue = gp.quicksum(
             heatdemand_kwhth[t] * thermal_revenue_per_kwhth for t in range(n)
+        )
+        heatpump_fixed_cost_rp = (
+            heatpump_cost_rp_per_kwth * heatpump_nominal + heatpump_cost_rp_fixed
         )
         
         expr = gp.quicksum(
@@ -129,9 +134,11 @@ def add_objective(
             + (power_tariff_low_use - power_tariff_high_use) * export_low_grid_use
         ) * gp.quicksum(
             monthly_peak_kw[month_label] for month_label in unique_month_labels
-        ) + battery_installed * (battery_capex + battery_annual_opex) - production_revenue + woodchip_net_cost - thermal_revenue
+        ) + battery_installed * (battery_capex + battery_annual_opex) + heatpump_fixed_cost_rp - production_revenue + woodchip_net_cost - thermal_revenue
     elif objective_mode == "emissions":
-        expr = build_annual_emissions_expr(vars_dict, production_kwh, n)
+        expr = build_annual_emissions_expr(vars_dict, production_kwh, n) + gp.quicksum(
+            heatpump_heat[t] * heatpump_emissions_per_kwhth for t in range(n)
+        )
     else:
         raise ValueError(f"Unknown objective_mode: {objective_mode}")
 

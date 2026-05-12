@@ -19,7 +19,6 @@ from parameters.runofriver import RUNOFRIVER_ECONOMIC, RUNOFRIVER_EMISSIONS
 from parameters.grid_export import EXPORT_EMISSIONS, export_price_rp_per_kwh
 from parameters.grid_import import IMPORT_EMISSIONS
 from parameters.general import GENERAL
-from parameters.grid_thermal import GRID_THERMAL_ECONOMIC
 from parameters.woodchip_boiler import WOODCHIP_BOILER_ECONOMIC, WOODCHIP_BOILER_EMISSIONS
 
 
@@ -48,7 +47,7 @@ def calculate_current_state(
     runofriver_profit_rp_per_kwh = RUNOFRIVER_ECONOMIC["profit_rp_per_kwh"]
     runofriver_emissions_per_kwh = RUNOFRIVER_EMISSIONS["emissions_kgco2eq_per_kwh_generated"]
     woodchip_cost_rp_per_kwhth = WOODCHIP_BOILER_ECONOMIC["cost_rp_per_kwhth_useful"]
-    thermal_revenue_rp_per_kwhth = GRID_THERMAL_ECONOMIC["revenue_rp_per_kwhth_sold"]
+    thermal_revenue_rp_per_kwhth = WOODCHIP_BOILER_ECONOMIC["revenue_rp_per_kwhth_sold"]
     woodchip_emissions_per_kwhth = WOODCHIP_BOILER_EMISSIONS["emissions_kgco2eq_per_kwhth"]
     grid_emissions_per_kwh = IMPORT_EMISSIONS["grid_emissions_kgco2_per_kwh"]
     export_emissions_per_kwh = EXPORT_EMISSIONS["export_emissions_kgco2_per_kwh"]

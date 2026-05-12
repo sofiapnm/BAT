@@ -238,7 +238,7 @@ def build_figure(dataframe, current_state_point):
     fig.update_xaxes(title_text="Annual Emissions Burden [kgCO2]")
     fig.update_yaxes(title_text="Net Annual Profit [CHF]")
     fig.update_layout(
-        title="V1.2 Pareto Front",
+        title="Pareto Front Optimization of Grid Dispatch considering Technology Candidates, Cost and Emissions Minimization",
         template="plotly_white",
         hovermode="closest",
         height=700,

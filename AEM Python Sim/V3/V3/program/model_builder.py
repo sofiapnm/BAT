@@ -12,7 +12,7 @@ from variables import add_variables
 
 def build_model(
     production_kwh,
-    demand_kwh,
+    elecdemand_kwh,
     heatdemand_kwhth,
     spot_price_rp_per_kwh,
     datetime_series,
@@ -21,7 +21,7 @@ def build_model(
     final_soc_kwh,
     emissions_cap_kgco2=None,
 ):
-    n = len(demand_kwh)
+    n = len(elecdemand_kwh)
 
     model = gp.Model(GENERAL["solver_name"])
     model.Params.OutputFlag = GENERAL["gurobi_output_flag"]
@@ -39,7 +39,7 @@ def build_model(
         model=model,
         vars_dict=vars_dict,
         production_kwh=production_kwh,
-        demand_kwh=demand_kwh,
+        elecdemand_kwh=elecdemand_kwh,
         n=n,
     )
 
@@ -58,7 +58,7 @@ def build_model(
             name=f"prod_local_max_prod[{t}]",
         )
         model.addConstr(
-            prod_for_local[t] <= demand_kwh[t],
+                prod_for_local[t] <= elecdemand_kwh[t],
             name=f"prod_local_max_demand[{t}]",
         )
 

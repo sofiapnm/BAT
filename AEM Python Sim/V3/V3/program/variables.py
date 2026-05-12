@@ -56,11 +56,19 @@ def add_variables(model, n):
         n, lb=0.0, vtype=GRB.CONTINUOUS, name="woodchip_boiler_heat_kWhth"
     )
 
-    # Woodchip boiler heat supply share: fraction of thermal demand met by woodchip [dimensionless]
-    # As additional heat sources are added (solar thermal, heat pump, etc.), their shares become
-    # additional decision variables, and together they optimize to meet total thermal demand.
-    vars_dict["woodchip_heat_supply_share"] = model.addVars(
-        n, lb=0.0, ub=1.0, vtype=GRB.CONTINUOUS, name="woodchip_heat_supply_share"
+    # Heat pump thermal output [kWh_th]
+    vars_dict["heatpump_heat_kWhth"] = model.addVars(
+        n, lb=0.0, vtype=GRB.CONTINUOUS, name="heatpump_heat_kWhth"
+    )
+
+    # Heat pump electrical demand [kWh_el]
+    vars_dict["heatpump_elec_kWh"] = model.addVars(
+        n, lb=0.0, vtype=GRB.CONTINUOUS, name="heatpump_elec_kWh"
+    )
+
+    # Heat pump nominal thermal capacity [kWh_th per timestep]
+    vars_dict["heatpump_nominal_kWhth"] = model.addVar(
+        lb=0.0, vtype=GRB.CONTINUOUS, name="heatpump_nominal_kWhth"
     )
 
     return vars_dict

@@ -13,13 +13,14 @@ from parameters.grid_export import (
     EXPORT_EMISSIONS,
     export_price_rp_per_kwh,
 )
-from parameters.grid_thermal import GRID_THERMAL_ECONOMIC
+from parameters.heat_pump import HEAT_PUMP_ECONOMIC, HEAT_PUMP_EMISSIONS
 from parameters.runofriver import RUNOFRIVER_ECONOMIC, RUNOFRIVER_EMISSIONS
 from parameters.woodchip_boiler import WOODCHIP_BOILER_ECONOMIC, WOODCHIP_BOILER_EMISSIONS
 
 
 def extract_solution(vars_dict, n):
     battery_installed = float(vars_dict["battery_installed"].X)
+    heatpump_nominal = float(vars_dict["heatpump_nominal_kWhth"].X)
     return pd.DataFrame(
         {
             "battery_installed": [battery_installed for _ in range(n)],
@@ -30,7 +31,11 @@ def extract_solution(vars_dict, n):
             "battery_soc_kWh": [vars_dict["soc"][t].X for t in range(n)],
             "prod_for_local_demand_kWh": [vars_dict["prod_for_local_demand"][t].X for t in range(n)],
             "woodchip_boiler_heat_kWhth": [vars_dict["woodchip_boiler_heat_kWhth"][t].X for t in range(n)],
-            "woodchip_heat_supply_share": [vars_dict["woodchip_heat_supply_share"][t].X for t in range(n)],
+            "heatpump_heat_kWhth": [vars_dict["heatpump_heat_kWhth"][t].X for t in range(n)],
+            "heatpump_elec_kWh": [vars_dict["heatpump_elec_kWh"][t].X for t in range(n)],
+            "heatpump_nominal_kWhth": [heatpump_nominal for _ in range(n)],
+            "Q_HP_kWhth": [vars_dict["heatpump_heat_kWhth"][t].X for t in range(n)],
+            "E_elec_HP_kWh": [vars_dict["heatpump_elec_kWh"][t].X for t in range(n)],
         }
     )
 
@@ -65,6 +70,14 @@ def build_kwh_results_table(
     for col in solution.columns:
         results[col] = solution[col].values
 
+    heatdemand_nonzero = results["heatdemand_kWhth"].replace(0.0, pd.NA)
+    results["woodchip_heat_supply_share"] = (
+        results["woodchip_boiler_heat_kWhth"].div(heatdemand_nonzero).fillna(0.0)
+    )
+    results["heatpump_heat_supply_share"] = (
+        results["heatpump_heat_kWhth"].div(heatdemand_nonzero).fillna(0.0)
+    )
+
     return results
 
 
@@ -79,6 +92,9 @@ def build_results_table(
     monthly_peak_emis,
 ):
     results = pd.DataFrame({"DateTime": datetime_series})
+    results["heatdemand_kWhth"] = pd.Series(
+        heatdemand_profile, index=results.index, dtype=float
+    )
 
     for col in sol_cost.columns:
         results[f"cost_opt__{col}"] = sol_cost[col].values
@@ -97,7 +113,7 @@ def build_results_table(
     runofriver_profit_per_kwh = RUNOFRIVER_ECONOMIC["profit_rp_per_kwh"]
     runofriver_emissions_per_kwh = RUNOFRIVER_EMISSIONS["emissions_kgco2eq_per_kwh_generated"]
     woodchip_cost_per_kwhth = WOODCHIP_BOILER_ECONOMIC["cost_rp_per_kwhth_useful"]
-    thermal_revenue_per_kwhth = GRID_THERMAL_ECONOMIC["revenue_rp_per_kwhth_sold"]
+    thermal_revenue_per_kwhth = WOODCHIP_BOILER_ECONOMIC["revenue_rp_per_kwhth_sold"]
     woodchip_emissions_per_kwhth = WOODCHIP_BOILER_EMISSIONS["emissions_kgco2eq_per_kwhth"]
 
     spot_price_series = pd.Series(spot_price, index=results.index, dtype=float)
@@ -140,18 +156,67 @@ def build_results_table(
     else:
         emis_woodchip_heat_series = pd.Series(0.0, index=results.index, dtype=float)
 
-    thermal_revenue_series = pd.Series(heatdemand_profile, index=results.index, dtype=float) * thermal_revenue_per_kwhth
+    cost_heatpump_heat_series = pd.Series(
+        sol_cost["heatpump_heat_kWhth"], index=results.index, dtype=float
+    ) if "heatpump_heat_kWhth" in sol_cost else pd.Series(0.0, index=results.index, dtype=float)
+    emis_heatpump_heat_series = pd.Series(
+        sol_emis["heatpump_heat_kWhth"], index=results.index, dtype=float
+    ) if "heatpump_heat_kWhth" in sol_emis else pd.Series(0.0, index=results.index, dtype=float)
+
+    thermal_revenue_series = pd.Series(
+        heatdemand_profile, index=results.index, dtype=float
+    ) * thermal_revenue_per_kwhth
 
     results["cost_opt__monthly_power_tariff_rp"] = 0.0
     results["emissions_opt__monthly_power_tariff_rp"] = 0.0
     results["cost_opt__battery_fixed_cost_rp"] = 0.0
     results["emissions_opt__battery_fixed_cost_rp"] = 0.0
+    results["cost_opt__heatpump_fixed_cost_rp"] = 0.0
+    results["emissions_opt__heatpump_fixed_cost_rp"] = 0.0
+    results["cost_opt__heatpump_emissions_kgco2"] = 0.0
+    results["emissions_opt__heatpump_emissions_kgco2"] = 0.0
     results["cost_opt__woodchip_cost_rp"] = (
         cost_woodchip_heat_series * woodchip_cost_per_kwhth
+    )
+    results["cost_opt__heatpump_heat_kWhth"] = cost_heatpump_heat_series
+    results["cost_opt__Q_HP_kWhth"] = cost_heatpump_heat_series
+    results["cost_opt__E_elec_HP_kWh"] = pd.Series(
+        sol_cost["heatpump_elec_kWh"], index=results.index, dtype=float
+    ) if "heatpump_elec_kWh" in sol_cost else pd.Series(0.0, index=results.index, dtype=float)
+    results["cost_opt__heatpump_emissions_kgco2"] = (
+        cost_heatpump_heat_series * HEAT_PUMP_EMISSIONS["emissions_kgco2eq_per_kwhth"]
+    )
+    results["cost_opt__woodchip_heat_supply_share"] = (
+        results["cost_opt__woodchip_boiler_heat_kWhth"]
+        .div(results["heatdemand_kWhth"].replace(0.0, pd.NA))
+        .fillna(0.0)
+    )
+    results["cost_opt__heatpump_heat_supply_share"] = (
+        results["cost_opt__heatpump_heat_kWhth"]
+        .div(results["heatdemand_kWhth"].replace(0.0, pd.NA))
+        .fillna(0.0)
     )
     results["cost_opt__thermal_revenue_rp"] = thermal_revenue_series
     results["emissions_opt__woodchip_cost_rp"] = (
         emis_woodchip_heat_series * woodchip_cost_per_kwhth
+    )
+    results["emissions_opt__heatpump_heat_kWhth"] = emis_heatpump_heat_series
+    results["emissions_opt__Q_HP_kWhth"] = emis_heatpump_heat_series
+    results["emissions_opt__E_elec_HP_kWh"] = pd.Series(
+        sol_emis["heatpump_elec_kWh"], index=results.index, dtype=float
+    ) if "heatpump_elec_kWh" in sol_emis else pd.Series(0.0, index=results.index, dtype=float)
+    results["emissions_opt__heatpump_emissions_kgco2"] = (
+        emis_heatpump_heat_series * HEAT_PUMP_EMISSIONS["emissions_kgco2eq_per_kwhth"]
+    )
+    results["emissions_opt__woodchip_heat_supply_share"] = (
+        results["emissions_opt__woodchip_boiler_heat_kWhth"]
+        .div(results["heatdemand_kWhth"].replace(0.0, pd.NA))
+        .fillna(0.0)
+    )
+    results["emissions_opt__heatpump_heat_supply_share"] = (
+        results["emissions_opt__heatpump_heat_kWhth"]
+        .div(results["heatdemand_kWhth"].replace(0.0, pd.NA))
+        .fillna(0.0)
     )
     results["emissions_opt__thermal_revenue_rp"] = thermal_revenue_series
     results["cost_opt__runofriver_profit_rp"] = (
@@ -165,6 +230,13 @@ def build_results_table(
     if len(results) > 0:
         results.loc[results.index[0], "cost_opt__battery_fixed_cost_rp"] = annual_battery_fixed_cost_cost
         results.loc[results.index[0], "emissions_opt__battery_fixed_cost_rp"] = annual_battery_fixed_cost_emis
+        heatpump_nominal = float(sol_cost["heatpump_nominal_kWhth"].iloc[0]) if "heatpump_nominal_kWhth" in sol_cost else 0.0
+        heatpump_fixed_cost_rp = (
+            HEAT_PUMP_ECONOMIC["cost_rp_per_kwth_nominal"] * heatpump_nominal
+            + HEAT_PUMP_ECONOMIC["cost_rp_fixed"]
+        )
+        results.loc[results.index[0], "cost_opt__heatpump_fixed_cost_rp"] = heatpump_fixed_cost_rp
+        results.loc[results.index[0], "emissions_opt__heatpump_fixed_cost_rp"] = heatpump_fixed_cost_rp
 
     results["cost_opt__step_cost_rp"] = (
         results["cost_opt__grid_import_kWh"]
@@ -181,6 +253,7 @@ def build_results_table(
         - results["cost_opt__thermal_revenue_rp"]
         + results["cost_opt__monthly_power_tariff_rp"]
         + results["cost_opt__battery_fixed_cost_rp"]
+        + results["cost_opt__heatpump_fixed_cost_rp"]
     )
 
     results["emissions_opt__step_cost_rp"] = (
@@ -205,6 +278,7 @@ def build_results_table(
         + results["cost_opt__grid_export_kWh"] * export_emissions
         + production_series * runofriver_emissions_per_kwh
         + cost_woodchip_heat_series * woodchip_emissions_per_kwhth
+        + results["cost_opt__heatpump_emissions_kgco2"]
     )
 
     results["emissions_opt__step_emissions_kgco2"] = (
@@ -212,6 +286,7 @@ def build_results_table(
         + results["emissions_opt__grid_export_kWh"] * export_emissions
         + production_series * runofriver_emissions_per_kwh
         + emis_woodchip_heat_series * woodchip_emissions_per_kwhth
+        + results["emissions_opt__heatpump_emissions_kgco2"]
     )
 
     return results
@@ -235,8 +310,11 @@ def summarize_solution(
     runofriver_profit_per_kwh = RUNOFRIVER_ECONOMIC["profit_rp_per_kwh"]
     runofriver_emissions_per_kwh = RUNOFRIVER_EMISSIONS["emissions_kgco2eq_per_kwh_generated"]
     woodchip_cost_per_kwhth = WOODCHIP_BOILER_ECONOMIC["cost_rp_per_kwhth_useful"]
-    thermal_revenue_per_kwhth = GRID_THERMAL_ECONOMIC["revenue_rp_per_kwhth_sold"]
+    thermal_revenue_per_kwhth = WOODCHIP_BOILER_ECONOMIC["revenue_rp_per_kwhth_sold"]
     woodchip_emissions_per_kwhth = WOODCHIP_BOILER_EMISSIONS["emissions_kgco2eq_per_kwhth"]
+    heatpump_cost_rp_per_kwth = HEAT_PUMP_ECONOMIC["cost_rp_per_kwth_nominal"]
+    heatpump_cost_rp_fixed = HEAT_PUMP_ECONOMIC["cost_rp_fixed"]
+    heatpump_emissions_per_kwhth = HEAT_PUMP_EMISSIONS["emissions_kgco2eq_per_kwhth"]
 
     spot_price_series = pd.Series(spot_price, dtype=float)
     production_series = pd.Series(production, dtype=float)
@@ -270,7 +348,19 @@ def summarize_solution(
         annual_woodchip_heat_kwhth = float(solution["woodchip_boiler_heat_kWhth"].sum())
     else:
         annual_woodchip_heat_kwhth = 0.0
+    if "heatpump_nominal_kWhth" in solution:
+        annual_heatpump_nominal_kwhth = float(solution["heatpump_nominal_kWhth"].iloc[0])
+    else:
+        annual_heatpump_nominal_kwhth = 0.0
+    if "heatpump_heat_kWhth" in solution:
+        annual_heatpump_heat_kwhth = float(solution["heatpump_heat_kWhth"].sum())
+    else:
+        annual_heatpump_heat_kwhth = 0.0
     annual_woodchip_cost_rp = annual_woodchip_heat_kwhth * woodchip_cost_per_kwhth
+    annual_heatpump_fixed_cost_rp = (
+        heatpump_cost_rp_per_kwth * annual_heatpump_nominal_kwhth + heatpump_cost_rp_fixed
+    )
+    annual_heatpump_emissions_kgco2 = annual_heatpump_heat_kwhth * heatpump_emissions_per_kwhth
     annual_thermal_revenue_rp = float(pd.Series(heatdemand, dtype=float).sum()) * thermal_revenue_per_kwhth
     annual_cost_burden_rp = (
         annual_import_cost_rp
@@ -281,6 +371,7 @@ def summarize_solution(
         - annual_thermal_revenue_rp
         + annual_power_cost_rp
         + annual_battery_fixed_cost_rp
+        + annual_heatpump_fixed_cost_rp
     )
     net_annual_profit_chf = -annual_cost_burden_rp / 100.0
     annual_emissions_burden_kgco2 = float(
@@ -288,6 +379,7 @@ def summarize_solution(
         + annual_export_kwh * export_emissions
         + production_series.sum() * runofriver_emissions_per_kwh
         + annual_woodchip_heat_kwhth * woodchip_emissions_per_kwhth
+        + annual_heatpump_emissions_kgco2
     )
 
     return {
@@ -300,6 +392,9 @@ def summarize_solution(
         "annual_battery_charge_kwh": float(solution["battery_charge_kWh"].sum()),
         "annual_battery_discharge_kwh": float(solution["battery_discharge_kWh"].sum()),
         "annual_woodchip_heat_kwhth": annual_woodchip_heat_kwhth,
+        "annual_heatpump_heat_kwhth": annual_heatpump_heat_kwhth,
+        "annual_heatpump_nominal_kwhth": annual_heatpump_nominal_kwhth,
+        "annual_heatpump_fixed_cost_rp": annual_heatpump_fixed_cost_rp,
         "annual_thermal_revenue_chf": annual_thermal_revenue_rp / 100.0,
     }
 

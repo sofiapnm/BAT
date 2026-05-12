@@ -70,7 +70,11 @@ def load_anchor_summaries():
             "battery_soc_kWh",
             "prod_for_local_demand_kWh",
             "woodchip_boiler_heat_kWhth",
+            "heatpump_heat_kWhth",
+            "heatpump_elec_kWh",
+            "heatpump_nominal_kWhth",
             "woodchip_heat_supply_share",
+            "heatpump_heat_supply_share",
         ]
     ].astype(float)
     emissions_solution = reconstruct_solution(results, "emissions_opt__")
@@ -121,7 +125,7 @@ def main():
     )
 
     production = kwh_results["production_kWh"]
-    demand = kwh_results["load_kWh"]
+    elecdemand = kwh_results["load_kWh"]
     heatdemand = kwh_results["heatdemand_kWhth"]
     spot_price = kwh_results["spot price [Rp/kWh]"]
     datetime_series = kwh_results["DateTime"]
@@ -129,7 +133,7 @@ def main():
     for i, emissions_cap in enumerate(emissions_caps):
         model_pareto, vars_pareto = build_model(
             production_kwh=production,
-            demand_kwh=demand,
+            elecdemand_kwh=elecdemand,
             heatdemand_kwhth=heatdemand,
             spot_price_rp_per_kwh=spot_price,
             datetime_series=datetime_series,
@@ -139,7 +143,7 @@ def main():
             emissions_cap_kgco2=emissions_cap,
         )
         solve_model(model_pareto, objective_mode=f"pareto_cost_cap_{i}")
-        sol_pareto = extract_solution(vars_pareto, len(demand))
+        sol_pareto = extract_solution(vars_pareto, len(elecdemand))
         monthly_peak_pareto = extract_monthly_peak_solution(vars_pareto)
         pareto_summary = summarize_solution(
             solution=sol_pareto,
