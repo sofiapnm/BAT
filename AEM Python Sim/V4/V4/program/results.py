@@ -137,6 +137,9 @@ def build_results_table(
     woodchip_cost_per_kwhth = WOODCHIP_BOILER_ECONOMIC["cost_rp_per_kwhth_useful"]
     thermal_revenue_per_kwhth = WOODCHIP_BOILER_ECONOMIC["revenue_rp_per_kwhth_sold"]
     woodchip_emissions_per_kwhth = WOODCHIP_BOILER_EMISSIONS["emissions_kgco2eq_per_kwhth"]
+    ptes_cost_factor = PTES_ECONOMIC["cost_rp_per_year_factor"]
+    ptes_cost_exp = PTES_ECONOMIC["cost_chf_exp"]
+    ptes_emissions_per_m3 = PTES_EMISSIONS["emissions_kgco2eq_per_m3"]
 
     spot_price_series = pd.Series(spot_price, index=results.index, dtype=float)
     production_series = pd.Series(production, index=results.index, dtype=float)
@@ -286,8 +289,12 @@ def build_results_table(
         results.loc[results.index[0], "emissions_opt__battery_fixed_cost_rp"] = annual_battery_fixed_cost_emis
         heatpump_nominal = float(sol_cost["heatpump_nominal_kWhth"].iloc[0]) if "heatpump_nominal_kWhth" in sol_cost else 0.0
         heatpump_fixed_cost_rp = (
-            HEAT_PUMP_ECONOMIC["cost_rp_per_kwth_nominal"] * heatpump_nominal
-            + HEAT_PUMP_ECONOMIC["cost_rp_fixed"]
+            (
+                HEAT_PUMP_ECONOMIC["annual_capex_rp_per_kwth_amortized"]
+                + HEAT_PUMP_ECONOMIC["annual_opex_rp_per_kwth_year"]
+            )
+            * heatpump_nominal
+            + HEAT_PUMP_ECONOMIC["annual_capex_rp_fixed_amortized"]
         )
         results.loc[results.index[0], "cost_opt__heatpump_fixed_cost_rp"] = heatpump_fixed_cost_rp
         results.loc[results.index[0], "emissions_opt__heatpump_fixed_cost_rp"] = heatpump_fixed_cost_rp
@@ -391,8 +398,13 @@ def summarize_solution(
     woodchip_cost_per_kwhth = WOODCHIP_BOILER_ECONOMIC["cost_rp_per_kwhth_useful"]
     thermal_revenue_per_kwhth = WOODCHIP_BOILER_ECONOMIC["revenue_rp_per_kwhth_sold"]
     woodchip_emissions_per_kwhth = WOODCHIP_BOILER_EMISSIONS["emissions_kgco2eq_per_kwhth"]
+    ptes_cost_factor = PTES_ECONOMIC["cost_rp_per_year_factor"]
+    ptes_cost_exp = PTES_ECONOMIC["cost_chf_exp"]
+    ptes_emissions_per_m3 = PTES_EMISSIONS["emissions_kgco2eq_per_m3"]
     heatpump_cost_rp_per_kwth = HEAT_PUMP_ECONOMIC["cost_rp_per_kwth_nominal"]
-    heatpump_cost_rp_fixed = HEAT_PUMP_ECONOMIC["cost_rp_fixed"]
+    heatpump_lifetime_years = HEAT_PUMP_ECONOMIC["heatpump_lifetime_years"]
+    heatpump_annual_opex_rp_per_kwth_year = HEAT_PUMP_ECONOMIC["annual_opex_rp_per_kwth_year"]
+    heatpump_annual_capex_rp_fixed_amortized = HEAT_PUMP_ECONOMIC["annual_capex_rp_fixed_amortized"]
     heatpump_emissions_per_kwhth = HEAT_PUMP_EMISSIONS["emissions_kgco2eq_per_kwhth"]
 
     spot_price_series = pd.Series(spot_price, dtype=float)
@@ -435,30 +447,48 @@ def summarize_solution(
         annual_heatpump_heat_kwhth = float(solution["heatpump_heat_kWhth"].sum())
     else:
         annual_heatpump_heat_kwhth = 0.0
+    if "ptes_volume_m3" in solution:
+        annual_ptes_volume_m3 = float(solution["ptes_volume_m3"].iloc[0])
+    else:
+        annual_ptes_volume_m3 = 0.0
     annual_woodchip_cost_rp = annual_woodchip_heat_kwhth * woodchip_cost_per_kwhth
     annual_heatpump_fixed_cost_rp = (
-        heatpump_cost_rp_per_kwth * annual_heatpump_nominal_kwhth + heatpump_cost_rp_fixed
+        (
+            heatpump_cost_rp_per_kwth / heatpump_lifetime_years
+            + heatpump_annual_opex_rp_per_kwth_year
+        ) * annual_heatpump_nominal_kwhth
+        + heatpump_annual_capex_rp_fixed_amortized
+    )
+    annual_ptes_fixed_cost_rp = (
+        ptes_cost_factor * (annual_ptes_volume_m3 ** ptes_cost_exp)
+        if annual_ptes_volume_m3 > 0
+        else 0.0
     )
     annual_heatpump_emissions_kgco2 = annual_heatpump_heat_kwhth * heatpump_emissions_per_kwhth
+    annual_ptes_emissions_kgco2 = annual_ptes_volume_m3 * ptes_emissions_per_m3
     annual_thermal_revenue_rp = float(pd.Series(heatdemand, dtype=float).sum()) * thermal_revenue_per_kwhth
-    annual_cost_burden_rp = (
-        annual_import_cost_rp
-        - annual_export_revenue_rp
-        + annual_battery_degradation_rp
-        - annual_runofriver_profit_rp
-        + annual_woodchip_cost_rp
-        - annual_thermal_revenue_rp
-        + annual_power_cost_rp
-        + annual_battery_fixed_cost_rp
-        + annual_heatpump_fixed_cost_rp
+    
+    # Calculate annual profit = revenues - costs (aligned with profit-maximization objective)
+    annual_profit_rp = (
+        annual_runofriver_profit_rp        # local generation revenue
+        + annual_export_revenue_rp         # export revenue
+        + annual_thermal_revenue_rp        # heat sales revenue
+        - annual_import_cost_rp            # grid import cost
+        - annual_battery_degradation_rp    # battery cycling wear
+        - annual_woodchip_cost_rp          # woodchip fuel cost
+        - annual_power_cost_rp             # monthly power tariff
+        - annual_battery_fixed_cost_rp     # battery amortized CAPEX/OPEX
+        - annual_heatpump_fixed_cost_rp    # heat pump amortized CAPEX/OPEX
+        - annual_ptes_fixed_cost_rp        # thermal storage amortized cost
     )
-    net_annual_profit_chf = -annual_cost_burden_rp / 100.0
+    net_annual_profit_chf = annual_profit_rp / 100.0
     annual_emissions_burden_kgco2 = float(
         annual_import_kwh * grid_emissions
         + annual_export_kwh * export_emissions
         + production_series.sum() * runofriver_emissions_per_kwh
         + annual_woodchip_heat_kwhth * woodchip_emissions_per_kwhth
         + annual_heatpump_emissions_kgco2
+        + annual_ptes_emissions_kgco2
     )
 
     return {
@@ -474,6 +504,8 @@ def summarize_solution(
         "annual_heatpump_heat_kwhth": annual_heatpump_heat_kwhth,
         "annual_heatpump_nominal_kwhth": annual_heatpump_nominal_kwhth,
         "annual_heatpump_fixed_cost_rp": annual_heatpump_fixed_cost_rp,
+        "annual_ptes_volume_m3": annual_ptes_volume_m3,
+        "annual_ptes_fixed_cost_rp": annual_ptes_fixed_cost_rp,
         "annual_thermal_revenue_chf": annual_thermal_revenue_rp / 100.0,
     }
 
@@ -506,12 +538,12 @@ def print_summary(results, output_path):
     print(f"Output file: {output_path}")
     print("")
     print("Annual totals")
-    print(f"Cost objective -> net annual profit [CHF]: {net_profit_costobj_chf:,.2f}")
+    print(f"Profit objective -> net annual profit [CHF]: {net_profit_costobj_chf:,.2f}")
     print(
-        f"Cost objective -> annual emissions burden [tCO2eq]: {total_emis_costobj_tco2eq:,.2f}"
+        f"Profit objective -> annual emissions burden [tCO2eq]: {total_emis_costobj_tco2eq:,.2f}"
     )
     print(
-        "Cost objective -> cost considering emission penalty [CHF]: "
+        "Profit objective -> cost considering emission penalty [CHF]: "
         f"{cost_with_emission_penalty_costobj_chf:,.2f}"
     )
     print(f"Emissions objective -> net annual profit [CHF]: {net_profit_emisobj_chf:,.2f}")
@@ -520,6 +552,6 @@ def print_summary(results, output_path):
         f"[tCO2eq]: {total_emis_emisobj_tco2eq:,.2f}"
     )
     print(
-        "Emissions objective -> cost considering emission penalty [CHF]: "
+        "Emissions objective -> profit considering emission penalty [CHF]: "
         f"{cost_with_emission_penalty_emisobj_chf:,.2f}"
     )

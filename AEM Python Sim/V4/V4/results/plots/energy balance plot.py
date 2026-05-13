@@ -18,7 +18,7 @@ def build_figure(dataframe):
 
     # Electricity series
     elec_negative_series = [
-        ("production_negative_kWh", "production_kWh"),
+        ("production_negative_kWh", "RoR_production_kWh"),
         ("battery_discharge_negative_kWh", "battery_discharge_kWh"),
         ("grid_import_negative_kWh", "grid_import_kWh"),
     ]
@@ -33,8 +33,12 @@ def build_figure(dataframe):
     thermal_negative_series = [
         ("woodchip_boiler_heat_negative_kWhth", "woodchip_boiler_heat_kWhth"),
         ("heatpump_heat_negative_kWhth", "heatpump_heat_kWhth"),
+        ("ptes_discharge_negative_kWhth", "ptes_discharge_kWhth"),
     ]
-    thermal_positive_series = [("heatdemand_positive_kWhth", "heatdemand_kWhth")]
+    thermal_positive_series = [
+        ("heatdemand_positive_kWhth", "heatdemand_kWhth"),
+        ("ptes_charge_positive_kWhth", "ptes_charge_kWhth"),
+    ]
 
     colors = {
         "production_negative_kWh": "#2ca02c",
@@ -46,7 +50,9 @@ def build_figure(dataframe):
         "heatpump_elec_kWh": "#17becf",
         "woodchip_boiler_heat_negative_kWhth": "#e377c2",
         "heatpump_heat_negative_kWhth": "#7f7f7f",
+        "ptes_discharge_negative_kWhth": "#bcbd22",
         "heatdemand_positive_kWhth": "#d62728",
+        "ptes_charge_positive_kWhth": "#ff7f0e",
         "spot price [Rp/kWh]": "#111111",
     }
 
@@ -94,6 +100,20 @@ def build_figure(dataframe):
         row=1,
         col=1,
         secondary_y=True,
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=dataframe["DateTime"],
+            y=dataframe["battery_soc_kWh"],
+            mode="lines",
+            name="battery_soc_kWh",
+            line={"width": 2, "color": "#BE34E0", "dash": "dash"},
+            showlegend=True,
+        ),
+        row=1,
+        col=1,
+        secondary_y=False,
     )
 
     fig.add_hline(
@@ -144,6 +164,20 @@ def build_figure(dataframe):
             col=1,
             secondary_y=False,
         )
+
+    fig.add_trace(
+        go.Scatter(
+            x=dataframe["DateTime"],
+            y=dataframe["ptes_soc_kWhth"],
+            mode="lines",
+            name="ptes_soc_kWhth",
+            line={"width": 2, "color": "#bcbd22", "dash": "dash"},
+            showlegend=True,
+        ),
+        row=2,
+        col=1,
+        secondary_y=False,
+    )
 
     fig.add_hline(
         y=0.0,
@@ -197,6 +231,8 @@ def main():
     # Create thermal energy columns
     df["woodchip_boiler_heat_negative_kWhth"] = -df["woodchip_boiler_heat_kWhth"]
     df["heatdemand_positive_kWhth"] = df["heatdemand_kWhth"]
+    df["ptes_discharge_negative_kWhth"] = -df["ptes_discharge_kWhth"]
+    df["ptes_charge_positive_kWhth"] = df["ptes_charge_kWhth"]
 
     fig = build_figure(df)
     fig.add_annotation(
@@ -204,7 +240,7 @@ def main():
         xref="paper",
         yref="paper",
         x=0,
-        y=1.08,
+        y=-0.12,
         showarrow=False,
         font={"size": 12, "color": "#444444"},
         align="left",

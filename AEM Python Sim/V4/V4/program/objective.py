@@ -109,7 +109,9 @@ def add_objective(
     woodchip_cost_per_kwhth = WOODCHIP_BOILER_ECONOMIC["cost_rp_per_kwhth_useful"]
     thermal_revenue_per_kwhth = WOODCHIP_BOILER_ECONOMIC["revenue_rp_per_kwhth_sold"]
     heatpump_cost_rp_per_kwth = HEAT_PUMP_ECONOMIC["cost_rp_per_kwth_nominal"]
-    heatpump_cost_rp_fixed = HEAT_PUMP_ECONOMIC["cost_rp_fixed"]
+    heatpump_lifetime_years = HEAT_PUMP_ECONOMIC["heatpump_lifetime_years"]
+    heatpump_annual_opex_rp_per_kwth_year = HEAT_PUMP_ECONOMIC["annual_opex_rp_per_kwth_year"]
+    heatpump_annual_capex_rp_fixed_amortized = HEAT_PUMP_ECONOMIC["annual_capex_rp_fixed_amortized"]
     heatpump_emissions_per_kwhth = HEAT_PUMP_EMISSIONS["emissions_kgco2eq_per_kwhth"]
     import_high_use_tariff = IMPORT_ECONOMIC["fixed_tariff_high_grid_use_rp_per_kwh"]
     import_low_use_tariff = IMPORT_ECONOMIC["fixed_tariff_low_grid_use_rp_per_kwh"]
@@ -130,11 +132,10 @@ def add_objective(
         * GENERAL["delta_t_h"]
     )
 
-    if objective_mode == "cost": # - : profit , + = cost
-        # Add PTES cost variable and constraint
+    if objective_mode == "cost":
         ptes_cost_var = model.addVar(lb=0.0, vtype=GRB.CONTINUOUS, name="ptes_annual_cost_rp")
         add_ptes_cost_constraint(model, ptes_volume, ptes_cost_var)
-        
+
         annual_grid_use_kwh = gp.quicksum(
             grid_import[t] + grid_export[t] for t in range(n)
         )
@@ -154,44 +155,72 @@ def add_objective(
             - annual_grid_use_upper_bound_kwh * export_low_grid_use,
             name="export_low_grid_use_lower_bound",
         )
-        
-        # Production revenue split:
-        # - prod_for_local_demand[t] gets runofriver_profit_per_kwh
-        # - Excess production (production[t] - prod_for_local_demand[t]) gets export revenue
+
         prod_for_local = vars_dict["prod_for_local_demand"]
-        production_revenue = gp.quicksum(
+        local_production_revenue = gp.quicksum(
             prod_for_local[t] * runofriver_profit_per_kwh
-            + (production_kwh[t] - prod_for_local[t]) * (spot_price_rp_per_kwh[t] - export_high_use_tariff)
             for t in range(n)
         )
-        woodchip_net_cost = gp.quicksum(
-            woodchip_heat[t] * woodchip_cost_per_kwhth for t in range(n)
+        export_revenue = gp.quicksum(
+            grid_export[t] * (spot_price_rp_per_kwh[t] - export_high_use_tariff)
+            for t in range(n)
         )
         thermal_revenue = gp.quicksum(
             heatdemand_kwhth[t] * thermal_revenue_per_kwhth for t in range(n)
         )
-        heatpump_fixed_cost_rp = (
-            heatpump_cost_rp_per_kwth * heatpump_nominal + heatpump_cost_rp_fixed
+        annual_revenues = (
+            local_production_revenue
+            + export_revenue
+            + thermal_revenue
         )
-        
-        expr = gp.quicksum(
+
+        grid_import_cost = gp.quicksum(
             grid_import[t] * (spot_price_rp_per_kwh[t] + import_high_use_tariff)
-            - grid_export[t] * (spot_price_rp_per_kwh[t] - export_high_use_tariff)
-            + battery_degradation_cost * (batt_charge[t] + batt_discharge[t])
             for t in range(n)
-        ) + (import_low_use_tariff - import_high_use_tariff) * export_low_grid_use * annual_grid_use_kwh + (
-            export_low_use_tariff - export_high_use_tariff - (import_low_use_tariff - import_high_use_tariff)
-        ) * export_low_grid_use * annual_export_kwh + (
+        )
+        battery_cycling_cost = gp.quicksum(
+            battery_degradation_cost * (batt_charge[t] + batt_discharge[t])
+            for t in range(n)
+        )
+        woodchip_cost = gp.quicksum(
+            woodchip_heat[t] * woodchip_cost_per_kwhth for t in range(n)
+        )
+        tariff_adjustment_cost = (
+            (import_low_use_tariff - import_high_use_tariff) * export_low_grid_use * annual_grid_use_kwh
+            + (export_low_use_tariff - export_high_use_tariff - (import_low_use_tariff - import_high_use_tariff))
+            * export_low_grid_use * annual_export_kwh
+        )
+        power_tariff_cost = (
             power_tariff_high_use
             + (power_tariff_low_use - power_tariff_high_use) * export_low_grid_use
         ) * gp.quicksum(
             monthly_peak_kw[month_label] for month_label in unique_month_labels
-        ) + battery_installed * (battery_capex + battery_annual_opex) + heatpump_fixed_cost_rp + ptes_cost_var - production_revenue + woodchip_net_cost - thermal_revenue
+        )
+        battery_fixed_cost = battery_installed * (battery_capex + battery_annual_opex)
+        heatpump_fixed_cost = (
+            (heatpump_cost_rp_per_kwth / heatpump_lifetime_years + heatpump_annual_opex_rp_per_kwth_year)
+            * heatpump_nominal
+            + heatpump_annual_capex_rp_fixed_amortized
+        )
+        ptes_storage_cost = ptes_cost_var
+
+        annual_costs = (
+            grid_import_cost
+            + battery_cycling_cost
+            + woodchip_cost
+            + tariff_adjustment_cost
+            + power_tariff_cost
+            + battery_fixed_cost
+            + heatpump_fixed_cost
+            + ptes_storage_cost
+        )
+
+        annual_profit = annual_revenues - annual_costs
+        model.setObjective(annual_profit, GRB.MAXIMIZE)
     elif objective_mode == "emissions":
         expr = build_annual_emissions_expr(vars_dict, production_kwh, n) + gp.quicksum(
             heatpump_heat[t] * heatpump_emissions_per_kwhth for t in range(n)
         )
+        model.setObjective(expr, GRB.MINIMIZE)
     else:
         raise ValueError(f"Unknown objective_mode: {objective_mode}")
-
-    model.setObjective(expr, GRB.MINIMIZE)

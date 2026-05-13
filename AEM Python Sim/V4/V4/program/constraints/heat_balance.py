@@ -5,12 +5,34 @@ from parameters.ptes import PTES_TECHNICAL
 
 def add_heat_balance_constraints(model, vars_dict, heatdemand_kwhth, n, datetime_series=None):
     """
-    Thermal energy balance: woodchip boiler, heat pump, and PTES storage jointly meet thermal demand.
+    Add thermal balance and heat-pump operating constraints.
 
-    Heat Balance: Q_woodchip + Q_HP + Q_PTES_discharge = Q_demand + Q_PTES_charge
+    Heat balance:
 
-    The heat pump converts electricity to heat with monthly-varying COP.
-    PTES provides temporal flexibility with charge/discharge efficiency and capacity limits.
+        Q_woodchip[t] + Q_HP[t] + Q_PTES_dis[t] = Q_demand[t] + Q_PTES_ch[t]
+
+    Heat-pump conversion:
+
+        Q_HP[t] = COP[m(t)] · E_HP[t]
+
+    Thermal cap:
+
+        0 ≤ Q_HP[t] ≤ Q_HP,max
+
+    Equivalent electric input bound:
+
+        0 ≤ E_HP[t] ≤ Q_HP,max / COP[m(t)]
+
+    Ramp constraint:
+
+        |E_HP[t] - E_HP[t-1]| ≤ ramp_limit
+
+    Optional exact modulation (disabled by default):
+
+        modulation_min_frac · (Q_HP,max / COP[m(t)]) · y[t] ≤ E_HP[t] ≤ (Q_HP,max / COP[m(t)]) · y[t]
+
+    With enforce_modulation_binary=False, the model behaves as a continuous
+    modulating unit that can operate anywhere between zero and its upper limit.
     """
     woodchip_heat = vars_dict["woodchip_boiler_heat_kWhth"]
     heatpump_heat = vars_dict["heatpump_heat_kWhth"]
@@ -29,13 +51,13 @@ def add_heat_balance_constraints(model, vars_dict, heatdemand_kwhth, n, datetime
     
     # Heat pump parameters
     cop_monthly = HEAT_PUMP_TECHNICAL["cop_monthly"]
-    hp_elec_max = HEAT_PUMP_TECHNICAL["hp_elec_max"]
+    hp_heat_max = HEAT_PUMP_TECHNICAL["hp_heat_max"]
     ramp_limit_kwh_per_timestep = HEAT_PUMP_TECHNICAL["ramp_limit_kwh_per_timestep"]
     modulation_min_frac = HEAT_PUMP_TECHNICAL["modulation_min_frac"]
     enforce_modulation_binary = HEAT_PUMP_TECHNICAL.get("enforce_modulation_binary", False)
     heatpump_on = vars_dict.get("heatpump_on")
 
-    # Extract month from datetime if provided, otherwise use constant COP
+    # Extract month from datetime if provided, otherwise use constant COP.
     if datetime_series is not None:
         months_raw = pd.to_datetime(datetime_series).dt.month.values
         # Handle NaN values by defaulting to January
@@ -53,7 +75,6 @@ def add_heat_balance_constraints(model, vars_dict, heatdemand_kwhth, n, datetime
 
     for t in range(n):
         # ===== HEAT BALANCE WITH PTES =====
-        # Q_woodchip + Q_HP + Q_PTES_discharge = Q_demand + Q_PTES_charge
         model.addConstr(
             woodchip_heat[t] + heatpump_heat[t] + ptes_discharge[t] 
             == heatdemand_kwhth[t] + ptes_charge[t],
@@ -61,20 +82,29 @@ def add_heat_balance_constraints(model, vars_dict, heatdemand_kwhth, n, datetime
         )
 
         # ===== HEAT PUMP CONSTRAINTS =====
-        # Heat pump COP relation
+        # Q_HP[t] = COP[m(t)] * E_HP[t]
         cop_t = cop_monthly[months[t] - 1]
         model.addConstr(
             heatpump_heat[t] == cop_t * heatpump_elec[t],
             name=f"heatpump_cop[{t}]",
         )
         
-        # Heat pump electrical limit
+        # Heat-pump output cap: the variable name is legacy, but the
+        # parameter now represents maximum thermal output per timestep.
+        # Enforce both Q_HP[t] <= Q_HP,max and the equivalent electric bound
+        # E_HP[t] <= Q_HP,max / COP[m(t)].
         model.addConstr(
-            heatpump_elec[t] <= hp_elec_max,
+            heatpump_heat[t] <= hp_heat_max,
+            name=f"heatpump_qhp_max[{t}]",
+        )
+
+        # Equivalent electric input bound derived from the thermal cap.
+        model.addConstr(
+            heatpump_elec[t] <= hp_heat_max / cop_t,
             name=f"heatpump_pel_max[{t}]",
         )
         
-        # Heat pump ramp rate limits
+        # Inter-temporal ramping on the electrical input.
         if t > 0:
             model.addConstr(
                 heatpump_elec[t] - heatpump_elec[t - 1] <= ramp_limit_kwh_per_timestep,
@@ -85,22 +115,20 @@ def add_heat_balance_constraints(model, vars_dict, heatdemand_kwhth, n, datetime
                 name=f"heatpump_ramp_down[{t}]",
             )
         
-        # Optional binary modulation enforcement
+        # Optional binary modulation enforcement.
+        # When enabled, the unit is either off or operating above a minimum
+        # turndown level. When disabled, the model is continuously modulating.
         if enforce_modulation_binary and heatpump_on is not None:
             model.addConstr(
-                heatpump_elec[t] <= hp_elec_max * heatpump_on[t],
+                heatpump_elec[t] <= (hp_heat_max / cop_t) * heatpump_on[t],
                 name=f"heatpump_pel_max_on[{t}]",
             )
             model.addConstr(
-                heatpump_elec[t] >= modulation_min_frac * hp_elec_max * heatpump_on[t],
+                heatpump_elec[t] >= modulation_min_frac * (hp_heat_max / cop_t) * heatpump_on[t],
                 name=f"heatpump_modulation_min[{t}]",
             )
         
-        # Heat pump thermal capacity limits
-        model.addConstr(
-            heatpump_heat[t] <= cop_t * hp_elec_max,
-            name=f"heatpump_qhp_capacity[{t}]",
-        )
+        # Nominal capacity cap: the optimized size still limits the heat output.
         model.addConstr(
             heatpump_heat[t] <= heatpump_nominal,
             name=f"heatpump_nominal_limit[{t}]",

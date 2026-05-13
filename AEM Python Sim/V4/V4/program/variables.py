@@ -30,12 +30,18 @@ def add_variables(model, n):
     vars_dict["grid_export"] = model.addVars(
         n, lb=0.0, vtype=GRB.CONTINUOUS, name="grid_export"
     )
+    vars_dict["grid_mode"] = model.addVars(
+        n, vtype=GRB.BINARY, name="grid_mode"
+    )
 
     vars_dict["batt_charge"] = model.addVars(
         n, lb=0.0, vtype=GRB.CONTINUOUS, name="batt_charge"
     )
     vars_dict["batt_discharge"] = model.addVars(
         n, lb=0.0, vtype=GRB.CONTINUOUS, name="batt_discharge"
+    )
+    vars_dict["batt_charge_mode"] = model.addVars(
+        n, vtype=GRB.BINARY, name="batt_charge_mode"
     )
 
     soc_lb = BATTERY_TECHNICAL["soc_min_frac"] * BATTERY_TECHNICAL["capacity_kwh"]

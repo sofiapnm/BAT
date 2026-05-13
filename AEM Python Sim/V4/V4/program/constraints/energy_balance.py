@@ -1,4 +1,5 @@
 from parameters.battery import BATTERY_TECHNICAL
+from parameters.general import GENERAL
 
 
 def add_energy_balance_constraints(model, vars_dict, production_kwh, elecdemand_kwh, n):
