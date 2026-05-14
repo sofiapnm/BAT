@@ -1,0 +1,16 @@
+HP:
+Technical:
+ -- max_elec_input = 577.5 kWhth per timestep
+-- peak heat demand = 1310.5 kWhth per timestep
+-- max realized heat pump output = 577.5 kWhth per timestep
+heat pump provides about 94.0% of total heat over the solved horizon
+it is at nominal output about 25.6% of the time and heavily loaded overall
+
+Costs:
+heat pump fixed cost ≈ CHF 391.41
+PTES fixed cost ≈ CHF 7.55
+battery fixed cost ≈ CHF 660,000
+net annual profit in the cost solution ≈ CHF 959,495.83
+
+**HP IS TOO CHEAP, SIZING IS NOT CORRECTLY REPRESENTED
+Hence, HP first satisfies heat demand and then supplies to PTES

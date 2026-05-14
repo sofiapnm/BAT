@@ -1,0 +1,1 @@
+hp_heat_max: 150.0 kWhth

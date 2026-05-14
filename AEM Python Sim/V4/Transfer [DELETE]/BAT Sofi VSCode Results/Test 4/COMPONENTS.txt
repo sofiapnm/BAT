@@ -1,0 +1,46 @@
+Optimizing Jan..2 of 2024 (timesteps: 5760)
+Rows solved (15-min intervals): 5760
+Output file: /workspaces/BAT/AEM Python Sim/V4/V4/results/Cost+Emi Results.csv
+
+Annual totals
+Profit objective -> net annual profit [CHF]: -345,035.82
+Profit objective -> annual emissions burden [tCO2eq]: 969.84
+Profit objective -> cost considering emission penalty [CHF]: -345,035.82
+Emissions objective -> net annual profit [CHF]: -329,581.53
+Emissions objective -> annual emissions burden [tCO2eq]: 969.84
+Emissions objective -> profit considering emission penalty [CHF]: -329,581.53
+
+PTES_TECHNICAL = {
+    "kwhth_per_m3": 137.84,  # Energy density: kWh_thermal per cubic meter of storage volume
+    "efficiency": 0.8,  # Round-trip efficiency (applied to charging process)
+    "lifetime_years": 30,  # Storage system lifetime for cost amortization
+}
+
+# Economic parameters
+PTES_ECONOMIC = {
+    # Specific cost (CHF per m^3) coefficients: specific_cost_chf_per_m3 = coeff * V^exp
+    # User-provided specific-cost formula: 6555.58 * V^-0.424 (CHF/m^3)
+    "specific_cost_chf_coeff": 6555.58,
+    "specific_cost_exp": -0.424,
+    # Lifetime used to annualize CAPEX (years)
+    "lifetime_years": 30,
+
+    # Note: total CAPEX CHF = specific_cost_chf_per_m3 * V (m^3)
+    # Annualized cost in rappen will be computed in objective.py as:
+    # (specific_cost_chf_per_m3 * V * 100) / lifetime_years
+    # Annual OPEX as a percentage of total CAPEX (e.g., 0.01 = 1% per year)
+    "annual_opex_percentage_of_capex": 0.01,
+}
+
+
+HEAT_PUMP_NONLINEAR = {
+    # Power-law coefficients (Q in kWth, cost in CHF)
+    "capex_coefficient_chf": 1100.0,
+    "capacity_scaling_divisor": 100.0,
+    "exponent": -0.46,
+    # Optimization range (kWth)
+    "q_nominal_min_kwth": 100.0,
+    "q_nominal_max_kwth": 4000.0,
+    # Number of piecewise linear segments
+    "num_breakpoints": 10,
+}
