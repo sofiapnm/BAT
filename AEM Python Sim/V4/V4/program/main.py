@@ -15,6 +15,10 @@ from results import (
 )
 
 
+# Set optimization horizon end month directly here (1-12), or None for full year.
+OPTIMIZATION_END_MONTH = 7
+
+
 def _resolve_objective_mode():
     mode_from_general = GENERAL.get("optimization_mode")
     mode_from_argv = sys.argv[1] if len(sys.argv) > 1 else None
@@ -43,34 +47,32 @@ def main():
 
     print(f"Starting optimization run in '{objective_mode}' mode...")
 
-    # Optional: limit optimization horizon Jan..END_MONTH (set in parameters.general)
-    end_month = GENERAL.get("optimization_end_month", None)
+    # Optional: limit optimization horizon Jan..END_MONTH (set directly in this file)
+    end_month = OPTIMIZATION_END_MONTH
     if end_month is not None:
-        # parse month (accept int 1-12 or name like 'June' or 'jun')
+        # Integer-only configuration by design.
         if isinstance(end_month, int):
-            end_month_num = int(end_month)
+            end_month_num = end_month
         else:
-            name = str(end_month).strip().lower()
-            months = {
-                'january':1,'jan':1,'february':2,'feb':2,'march':3,'mar':3,
-                'april':4,'apr':4,'may':5,'june':6,'jun':6,'july':7,'jul':7,
-                'august':8,'aug':8,'september':9,'sep':9,'october':10,'oct':10,
-                'november':11,'nov':11,'december':12,'dec':12
-            }
-            if name.isdigit():
-                end_month_num = int(name)
-            else:
-                end_month_num = months.get(name, None)
+            raise ValueError(
+                f"Invalid OPTIMIZATION_END_MONTH: {end_month}. Use integer 1..12 or None."
+            )
         if end_month_num is None or not (1 <= end_month_num <= 12):
-            raise ValueError(f"Invalid GENERAL['optimization_end_month']: {end_month}")
+            raise ValueError(
+                f"Invalid OPTIMIZATION_END_MONTH: {end_month}. Use integer 1..12 or None."
+            )
 
         dt = pd.to_datetime(data["datetime"])
         start_year = int(dt.iloc[0].year)
         mask = (dt.dt.year == start_year) & (dt.dt.month <= end_month_num) & (dt.dt.month >= 1)
+        mask_array = mask.to_numpy() if isinstance(mask, pd.Series) else mask
 
         # Apply mask to each timeseries in data (support Series, ndarray, list)
         data = {
-            k: (v[mask] if isinstance(v, pd.Series) else np.asarray(v)[mask.to_numpy()])
+            k: (
+                v[mask_array] if isinstance(v, pd.Series)
+                else np.asarray(v)[mask_array]
+            )
             for k, v in data.items()
         }
 

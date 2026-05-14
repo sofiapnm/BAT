@@ -14,11 +14,18 @@ PTES_TECHNICAL = {
 
 # Economic parameters
 PTES_ECONOMIC = {
-    "cost_chf_coeff": 8386.684,  # CHF coefficient for cost function
-    "cost_chf_exp": -0.424,  # Exponent for cost function: cost_CHF = coeff * V^exp
-    "cost_rp_per_year_factor": 838668.4 / 30,  # Converted to rappen and annualized
+    # Specific cost (CHF per m^3) coefficients: specific_cost_chf_per_m3 = coeff * V^exp
+    # User-provided specific-cost formula: 6555.58 * V^-0.424 (CHF/m^3)
+    "specific_cost_chf_coeff": 6555.58,
+    "specific_cost_exp": -0.424,
+    # Lifetime used to annualize CAPEX (years)
+    "lifetime_years": 30,
 
-    # Positive exponent ensures larger storage gets cheaper per-unit cost, but total cost increases
+    # Note: total CAPEX CHF = specific_cost_chf_per_m3 * V (m^3)
+    # Annualized cost in rappen will be computed in objective.py as:
+    # (specific_cost_chf_per_m3 * V * 100) / lifetime_years
+    # Annual OPEX as a percentage of total CAPEX (e.g., 0.01 = 1% per year)
+    "annual_opex_percentage_of_capex": 0.01,
 }
 
 # Emissions parameters

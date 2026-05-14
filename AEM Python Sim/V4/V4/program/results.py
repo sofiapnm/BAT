@@ -13,7 +13,12 @@ from parameters.grid_export import (
     EXPORT_EMISSIONS,
     export_price_rp_per_kwh,
 )
-from parameters.heat_pump import HEAT_PUMP_TECHNICAL, HEAT_PUMP_ECONOMIC, HEAT_PUMP_EMISSIONS
+from parameters.heat_pump import (
+    HEAT_PUMP_TECHNICAL,
+    HEAT_PUMP_ECONOMIC,
+    HEAT_PUMP_EMISSIONS,
+    heatpump_total_cost_rp,
+)
 from parameters.runofriver import RUNOFRIVER_ECONOMIC, RUNOFRIVER_EMISSIONS
 from parameters.woodchip_boiler import WOODCHIP_BOILER_ECONOMIC, WOODCHIP_BOILER_EMISSIONS
 from parameters.ptes import PTES_TECHNICAL, PTES_ECONOMIC, PTES_EMISSIONS
@@ -137,8 +142,6 @@ def build_results_table(
     woodchip_cost_per_kwhth = WOODCHIP_BOILER_ECONOMIC["cost_rp_per_kwhth_useful"]
     thermal_revenue_per_kwhth = WOODCHIP_BOILER_ECONOMIC["revenue_rp_per_kwhth_sold"]
     woodchip_emissions_per_kwhth = WOODCHIP_BOILER_EMISSIONS["emissions_kgco2eq_per_kwhth"]
-    ptes_cost_factor = PTES_ECONOMIC["cost_rp_per_year_factor"]
-    ptes_cost_exp = PTES_ECONOMIC["cost_chf_exp"]
     ptes_emissions_per_m3 = PTES_EMISSIONS["emissions_kgco2eq_per_m3"]
 
     spot_price_series = pd.Series(spot_price, index=results.index, dtype=float)
@@ -288,13 +291,12 @@ def build_results_table(
         results.loc[results.index[0], "cost_opt__battery_fixed_cost_rp"] = annual_battery_fixed_cost_cost
         results.loc[results.index[0], "emissions_opt__battery_fixed_cost_rp"] = annual_battery_fixed_cost_emis
         heatpump_nominal = float(sol_cost["heatpump_nominal_kWhth"].iloc[0]) if "heatpump_nominal_kWhth" in sol_cost else 0.0
+        heatpump_lifetime_years = HEAT_PUMP_ECONOMIC.get("heatpump_lifetime_years", 30)
+        heatpump_annual_opex_pct = HEAT_PUMP_ECONOMIC.get("annual_opex_percentage_of_capex", 0.01)
+        heatpump_capex_rp = heatpump_total_cost_rp(heatpump_nominal)
         heatpump_fixed_cost_rp = (
-            (
-                HEAT_PUMP_ECONOMIC["annual_capex_rp_per_kwth_amortized"]
-                + HEAT_PUMP_ECONOMIC["annual_opex_rp_per_kwth_year"]
-            )
-            * heatpump_nominal
-            + HEAT_PUMP_ECONOMIC["annual_capex_rp_fixed_amortized"]
+            heatpump_capex_rp / heatpump_lifetime_years
+            + heatpump_capex_rp * heatpump_annual_opex_pct
         )
         results.loc[results.index[0], "cost_opt__heatpump_fixed_cost_rp"] = heatpump_fixed_cost_rp
         results.loc[results.index[0], "emissions_opt__heatpump_fixed_cost_rp"] = heatpump_fixed_cost_rp
@@ -302,15 +304,26 @@ def build_results_table(
         # PTES costs and emissions
         ptes_volume_cost = float(sol_cost["ptes_volume_m3"].iloc[0]) if "ptes_volume_m3" in sol_cost else 0.0
         ptes_volume_emis = float(sol_emis["ptes_volume_m3"].iloc[0]) if "ptes_volume_m3" in sol_emis else 0.0
+        
         # Compute PTES cost using the cost function (annualized over 30 years)
-        if ptes_volume_cost > 0:
-            ptes_cost_rp_cost = PTES_ECONOMIC["cost_rp_per_year_factor"] * (ptes_volume_cost ** PTES_ECONOMIC["cost_chf_exp"])
-        else:
-            ptes_cost_rp_cost = 0.0
-        if ptes_volume_emis > 0:
-            ptes_cost_rp_emis = PTES_ECONOMIC["cost_rp_per_year_factor"] * (ptes_volume_emis ** PTES_ECONOMIC["cost_chf_exp"])
-        else:
-            ptes_cost_rp_emis = 0.0
+        # Cost formula: CAPEX = specific_cost_chf_per_m3 * V, where specific_cost = coeff * V^exp
+        def ptes_annual_cost_rp(volume):
+            if volume <= 0:
+                return 0.0
+            coeff = PTES_ECONOMIC["specific_cost_chf_coeff"]
+            exp = PTES_ECONOMIC["specific_cost_exp"]
+            lifetime = PTES_ECONOMIC.get("lifetime_years", PTES_TECHNICAL.get("lifetime_years", 30))
+            opex_pct = PTES_ECONOMIC.get("annual_opex_percentage_of_capex", 0.01)
+            
+            specific_cost_chf_per_m3 = coeff * (volume ** exp)
+            total_capex_chf = specific_cost_chf_per_m3 * volume  # MULTIPLY by volume
+            total_capex_rp = total_capex_chf * 100.0
+            annual_capex_rp = total_capex_rp / lifetime
+            annual_opex_rp = total_capex_rp * opex_pct
+            return annual_capex_rp + annual_opex_rp
+        
+        ptes_cost_rp_cost = ptes_annual_cost_rp(ptes_volume_cost)
+        ptes_cost_rp_emis = ptes_annual_cost_rp(ptes_volume_emis)
         # PTES emissions: embodied carbon per m³ per year
         ptes_emissions_cost = ptes_volume_cost * PTES_EMISSIONS["emissions_kgco2eq_per_m3"]
         ptes_emissions_emis = ptes_volume_emis * PTES_EMISSIONS["emissions_kgco2eq_per_m3"]
@@ -398,13 +411,9 @@ def summarize_solution(
     woodchip_cost_per_kwhth = WOODCHIP_BOILER_ECONOMIC["cost_rp_per_kwhth_useful"]
     thermal_revenue_per_kwhth = WOODCHIP_BOILER_ECONOMIC["revenue_rp_per_kwhth_sold"]
     woodchip_emissions_per_kwhth = WOODCHIP_BOILER_EMISSIONS["emissions_kgco2eq_per_kwhth"]
-    ptes_cost_factor = PTES_ECONOMIC["cost_rp_per_year_factor"]
-    ptes_cost_exp = PTES_ECONOMIC["cost_chf_exp"]
     ptes_emissions_per_m3 = PTES_EMISSIONS["emissions_kgco2eq_per_m3"]
-    heatpump_cost_rp_per_kwth = HEAT_PUMP_ECONOMIC["cost_rp_per_kwth_nominal"]
-    heatpump_lifetime_years = HEAT_PUMP_ECONOMIC["heatpump_lifetime_years"]
-    heatpump_annual_opex_rp_per_kwth_year = HEAT_PUMP_ECONOMIC["annual_opex_rp_per_kwth_year"]
-    heatpump_annual_capex_rp_fixed_amortized = HEAT_PUMP_ECONOMIC["annual_capex_rp_fixed_amortized"]
+    heatpump_lifetime_years = HEAT_PUMP_ECONOMIC.get("heatpump_lifetime_years", 30)
+    heatpump_annual_opex_pct = HEAT_PUMP_ECONOMIC.get("annual_opex_percentage_of_capex", 0.01)
     heatpump_emissions_per_kwhth = HEAT_PUMP_EMISSIONS["emissions_kgco2eq_per_kwhth"]
 
     spot_price_series = pd.Series(spot_price, dtype=float)
@@ -452,18 +461,29 @@ def summarize_solution(
     else:
         annual_ptes_volume_m3 = 0.0
     annual_woodchip_cost_rp = annual_woodchip_heat_kwhth * woodchip_cost_per_kwhth
+    annual_heatpump_capex_rp = heatpump_total_cost_rp(annual_heatpump_nominal_kwhth)
     annual_heatpump_fixed_cost_rp = (
-        (
-            heatpump_cost_rp_per_kwth / heatpump_lifetime_years
-            + heatpump_annual_opex_rp_per_kwth_year
-        ) * annual_heatpump_nominal_kwhth
-        + heatpump_annual_capex_rp_fixed_amortized
+        annual_heatpump_capex_rp / heatpump_lifetime_years
+        + annual_heatpump_capex_rp * heatpump_annual_opex_pct
     )
-    annual_ptes_fixed_cost_rp = (
-        ptes_cost_factor * (annual_ptes_volume_m3 ** ptes_cost_exp)
-        if annual_ptes_volume_m3 > 0
-        else 0.0
-    )
+    
+    # Compute PTES cost using the cost function (annualized over 30 years)
+    def ptes_annual_cost_rp(volume):
+        if volume <= 0:
+            return 0.0
+        coeff = PTES_ECONOMIC["specific_cost_chf_coeff"]
+        exp = PTES_ECONOMIC["specific_cost_exp"]
+        lifetime = PTES_ECONOMIC.get("lifetime_years", PTES_TECHNICAL.get("lifetime_years", 30))
+        opex_pct = PTES_ECONOMIC.get("annual_opex_percentage_of_capex", 0.01)
+        
+        specific_cost_chf_per_m3 = coeff * (volume ** exp)
+        total_capex_chf = specific_cost_chf_per_m3 * volume
+        total_capex_rp = total_capex_chf * 100.0
+        annual_capex_rp = total_capex_rp / lifetime
+        annual_opex_rp = total_capex_rp * opex_pct
+        return annual_capex_rp + annual_opex_rp
+    
+    annual_ptes_fixed_cost_rp = ptes_annual_cost_rp(annual_ptes_volume_m3)
     annual_heatpump_emissions_kgco2 = annual_heatpump_heat_kwhth * heatpump_emissions_per_kwhth
     annual_ptes_emissions_kgco2 = annual_ptes_volume_m3 * ptes_emissions_per_m3
     annual_thermal_revenue_rp = float(pd.Series(heatdemand, dtype=float).sum()) * thermal_revenue_per_kwhth
