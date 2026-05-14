@@ -22,7 +22,7 @@ GENERAL = {
     # Optional: limit optimization horizon to months Jan..END (set to month name
     # or number). e.g. "June" or 6 -> optimize from January up to June
     # inclusive. Use None for full horizon.
-    "optimization_end_month": "june",
+    "optimization_end_month": "april",
     # Optional: cap each optimization run (seconds). Use None for no explicit cap.
     "solver_time_limit_s": None,
     # If time limit is hit but a feasible incumbent exists, still use it for results.

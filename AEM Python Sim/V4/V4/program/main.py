@@ -1,6 +1,7 @@
 from data_loader import load_input_data
 import pandas as pd
 import numpy as np
+import sys
 from model_builder import build_model, solve_model
 from parameters.battery import BATTERY_TECHNICAL
 from parameters.general import GENERAL
@@ -13,10 +14,34 @@ from results import (
     save_results,
 )
 
+
+def _resolve_objective_mode():
+    mode_from_general = GENERAL.get("optimization_mode")
+    mode_from_argv = sys.argv[1] if len(sys.argv) > 1 else None
+
+    mode_raw = mode_from_general if mode_from_general is not None else mode_from_argv
+    if mode_raw is None:
+        mode_raw = input("Choose optimization mode ('profit' or 'emission'): ")
+
+    mode = str(mode_raw).strip().lower()
+    mapping = {
+        "profit": "cost",
+        "cost": "cost",
+        "emission": "emissions",
+        "emissions": "emissions",
+    }
+    resolved = mapping.get(mode)
+    if resolved is None:
+        raise ValueError(
+            f"Invalid optimization mode '{mode_raw}'. Use 'profit' or 'emission'."
+        )
+    return resolved
+
 def main():
     data = load_input_data(GENERAL["data_path"])
+    objective_mode = _resolve_objective_mode()
 
-    print("Starting optimization run...")
+    print(f"Starting optimization run in '{objective_mode}' mode...")
 
     # Optional: limit optimization horizon Jan..END_MONTH (set in parameters.general)
     end_month = GENERAL.get("optimization_end_month", None)
@@ -60,42 +85,33 @@ def main():
         BATTERY_TECHNICAL["soc_end_frac"] * BATTERY_TECHNICAL["capacity_kwh"]
     )
 
-    model_cost, vars_cost = build_model(
+    model, vars_dict = build_model(
         production_kwh=data["production"],
         elecdemand_kwh=data["elecdemand_kwhel"],
         heatdemand_kwhth=data["heatdemand_kwhth"],
         spot_price_rp_per_kwh=data["spot_price"],
         datetime_series=data["datetime"],
-        objective_mode="cost",
+        objective_mode=objective_mode,
         init_soc_kwh=full_horizon_init_soc,
         final_soc_kwh=full_horizon_end_soc,
     )
-    print("Solving cost model...")
-    solve_model(model_cost, objective_mode="cost")
-    print("Cost model solved.")
-    sol_cost = extract_solution(vars_cost, len(data["demand"]))
-    monthly_peak_cost = extract_monthly_peak_solution(vars_cost)
+    print(f"Solving {objective_mode} model...")
+    solve_model(model, objective_mode=objective_mode)
+    print(f"{objective_mode.capitalize()} model solved.")
 
-    model_emis, vars_emis = build_model(
-        production_kwh=data["production"],
-        elecdemand_kwh=data["elecdemand_kwhel"],
-        heatdemand_kwhth=data["heatdemand_kwhth"],
-        spot_price_rp_per_kwh=data["spot_price"],
-        datetime_series=data["datetime"],
-        objective_mode="emissions",
-        init_soc_kwh=full_horizon_init_soc,
-        final_soc_kwh=full_horizon_end_soc,
-    )
-    print("Solving emissions model...")
-    try:
-        solve_model(model_emis, objective_mode="emissions")
-        print("Emissions model solved.")
-        sol_emis = extract_solution(vars_emis, len(data["demand"]))
-        monthly_peak_emis = extract_monthly_peak_solution(vars_emis)
-    except Exception as exc:
-        print(f"Emissions model failed ({exc}). Using cost solution as fallback for result export.")
-        sol_emis = sol_cost.copy()
-        monthly_peak_emis = monthly_peak_cost.copy()
+    selected_solution = extract_solution(vars_dict, len(data["demand"]))
+    selected_monthly_peak = extract_monthly_peak_solution(vars_dict)
+
+    if objective_mode == "cost":
+        sol_cost = selected_solution
+        monthly_peak_cost = selected_monthly_peak
+        sol_emis = selected_solution.copy()
+        monthly_peak_emis = selected_monthly_peak.copy()
+    else:
+        sol_emis = selected_solution
+        monthly_peak_emis = selected_monthly_peak
+        sol_cost = selected_solution.copy()
+        monthly_peak_cost = selected_monthly_peak.copy()
 
     kwh_results = build_kwh_results_table(
         datetime_series=data["datetime"],
@@ -103,7 +119,7 @@ def main():
         heatdemand_profile=data["heatdemand_kwhth"],
         production_profile=data["production"],
         spot_price_profile=data["spot_price"],
-        solution=sol_cost,
+        solution=selected_solution,
     )
 
     results = build_results_table(
