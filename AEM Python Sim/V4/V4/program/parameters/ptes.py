@@ -9,6 +9,7 @@ and demand, enabling temporal flexibility in the thermal system.
 PTES_TECHNICAL = {
     "kwhth_per_m3": 137.84,  # Energy density: kWh_thermal per cubic meter of storage volume
     "efficiency": 0.8,  # Round-trip efficiency (applied to charging process)
+    "discharge_power_kwth":21464.328,  # Maximum discharge thermal power [kW_th]
     "lifetime_years": 30,  # Storage system lifetime for cost amortization
 }
 
@@ -27,6 +28,10 @@ PTES_ECONOMIC = {
     # Annual OPEX as a percentage of total CAPEX (e.g., 0.01 = 1% per year)
     "annual_opex_percentage_of_capex": 0.01,
 }
+
+# Small penalty per kWh throughput (charge + discharge) to discourage excessive cycling
+# Units: rappen per kWh
+PTES_ECONOMIC["throughput_penalty_rp_per_kwh"] = 0.001
 
 # Emissions parameters
 PTES_EMISSIONS = {

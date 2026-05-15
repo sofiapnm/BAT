@@ -1,6 +1,7 @@
 from gurobipy import GRB
 
 from parameters.battery import BATTERY_MODE, BATTERY_TECHNICAL
+from parameters.general import GENERAL
 from parameters.heat_pump import HEAT_PUMP_TECHNICAL
 from parameters.ptes import PTES_TECHNICAL
 
@@ -30,9 +31,10 @@ def add_variables(model, n):
     vars_dict["grid_export"] = model.addVars(
         n, lb=0.0, vtype=GRB.CONTINUOUS, name="grid_export"
     )
-    vars_dict["grid_mode"] = model.addVars(
-        n, vtype=GRB.BINARY, name="grid_mode"
-    )
+    if GENERAL.get("use_grid_exclusivity", False):
+        vars_dict["grid_mode"] = model.addVars(
+            n, vtype=GRB.BINARY, name="grid_mode"
+        )
 
     vars_dict["batt_charge"] = model.addVars(
         n, lb=0.0, vtype=GRB.CONTINUOUS, name="batt_charge"
@@ -40,9 +42,10 @@ def add_variables(model, n):
     vars_dict["batt_discharge"] = model.addVars(
         n, lb=0.0, vtype=GRB.CONTINUOUS, name="batt_discharge"
     )
-    vars_dict["batt_charge_mode"] = model.addVars(
-        n, vtype=GRB.BINARY, name="batt_charge_mode"
-    )
+    if GENERAL.get("use_battery_exclusivity", False):
+        vars_dict["batt_charge_mode"] = model.addVars(
+            n, vtype=GRB.BINARY, name="batt_charge_mode"
+        )
 
     soc_lb = BATTERY_TECHNICAL["soc_min_frac"] * BATTERY_TECHNICAL["capacity_kwh"]
     soc_ub = BATTERY_TECHNICAL["soc_max_frac"] * BATTERY_TECHNICAL["capacity_kwh"]
@@ -80,9 +83,14 @@ def add_variables(model, n):
             n, vtype=GRB.BINARY, name="heatpump_on"
         )
 
-    # Heat pump nominal thermal capacity [kWh_th per timestep]
-    vars_dict["heatpump_nominal_kWhth"] = model.addVar(
-        lb=0.0, vtype=GRB.CONTINUOUS, name="heatpump_nominal_kWhth"
+    # Heat pump nominal thermal power [kW_th]
+    vars_dict["heatpump_nominal_kwth"] = model.addVar(
+        lb=0.0, vtype=GRB.CONTINUOUS, name="heatpump_nominal_kwth"
+    )
+
+    # Woodchip boiler nominal thermal power [kW_th]
+    vars_dict["woodchip_nominal_kwth"] = model.addVar(
+        lb=0.0, vtype=GRB.CONTINUOUS, name="woodchip_nominal_kwth"
     )
 
     # PTES (Pit Thermal Energy Storage) variables [kWh_th]
@@ -93,6 +101,12 @@ def add_variables(model, n):
     vars_dict["ptes_discharge_kWhth"] = model.addVars(
         n, lb=0.0, vtype=GRB.CONTINUOUS, name="ptes_discharge_kWhth"
     )
+
+    # Optional PTES charge/discharge exclusivity binary.
+    if GENERAL.get("use_ptes_exclusivity", False):
+        vars_dict["ptes_charge_mode"] = model.addVars(
+            n, vtype=GRB.BINARY, name="ptes_charge_mode"
+        )
 
     # PTES state of charge [kWh_th]
     vars_dict["ptes_soc_kWhth"] = model.addVars(

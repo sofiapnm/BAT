@@ -26,7 +26,9 @@ from parameters.ptes import PTES_TECHNICAL, PTES_ECONOMIC, PTES_EMISSIONS
 
 def extract_solution(vars_dict, n):
     battery_installed = float(vars_dict["battery_installed"].X)
-    heatpump_nominal = float(vars_dict["heatpump_nominal_kWhth"].X)
+    heatpump_nominal = float(
+        vars_dict.get("heatpump_nominal_kwth", vars_dict.get("heatpump_nominal_kWhth")).X
+    )
     ptes_volume = float(vars_dict["ptes_volume_m3"].X)
     heatpump_on_vals = (
         [vars_dict["heatpump_on"][t].X for t in range(n)]
@@ -46,6 +48,7 @@ def extract_solution(vars_dict, n):
             "heatpump_heat_kWhth": [vars_dict["heatpump_heat_kWhth"][t].X for t in range(n)],
             "heatpump_elec_kWh": [vars_dict["heatpump_elec_kWh"][t].X for t in range(n)],
             "heatpump_on": heatpump_on_vals,
+            "heatpump_nominal_kwth": [heatpump_nominal for _ in range(n)],
             "heatpump_nominal_kWhth": [heatpump_nominal for _ in range(n)],
             "Q_HP_kWhth": [vars_dict["heatpump_heat_kWhth"][t].X for t in range(n)],
             "E_elec_HP_kWh": [vars_dict["heatpump_elec_kWh"][t].X for t in range(n)],

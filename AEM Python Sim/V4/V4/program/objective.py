@@ -74,7 +74,7 @@ def add_ptes_cost_constraint(model, ptes_volume, ptes_cost_var):
     )
 
 
-def add_heatpump_cost_constraint(model, heatpump_nominal, heatpump_cost_var):
+def add_heatpump_cost_constraint(model, heatpump_nominal_kwth, heatpump_cost_var):
     """
     Add piecewise linear constraint for heat pump nonlinear cost function.
     Cost [rappen] = 1100 * (Q_nominal / 100)^(-0.46) * 100 * Q_nominal
@@ -96,7 +96,7 @@ def add_heatpump_cost_constraint(model, heatpump_nominal, heatpump_cost_var):
     
     # Constraint: Q_nominal is linear combination of breakpoints
     model.addConstr(
-        heatpump_nominal == gp.quicksum(weights[i] * q_breakpoints[i] for i in range(len(q_breakpoints))),
+        heatpump_nominal_kwth == gp.quicksum(weights[i] * q_breakpoints[i] for i in range(len(q_breakpoints))),
         name="heatpump_nominal_interp"
     )
     
@@ -150,7 +150,7 @@ def add_objective(
     grid_export = vars_dict["grid_export"]
     woodchip_heat = vars_dict["woodchip_boiler_heat_kWhth"]
     heatpump_heat = vars_dict["heatpump_heat_kWhth"]
-    heatpump_nominal = vars_dict["heatpump_nominal_kWhth"]
+    heatpump_nominal_kwth = vars_dict["heatpump_nominal_kwth"]
     ptes_volume = vars_dict["ptes_volume_m3"]
     batt_charge = vars_dict["batt_charge"]
     batt_discharge = vars_dict["batt_discharge"]
@@ -173,56 +173,29 @@ def add_objective(
     heatpump_lifetime_years = HEAT_PUMP_ECONOMIC["heatpump_lifetime_years"]
     heatpump_opex_percentage = HEAT_PUMP_ECONOMIC["annual_opex_percentage_of_capex"]
     heatpump_emissions_per_kwhth = HEAT_PUMP_EMISSIONS["emissions_kgco2eq_per_kwhth"]
-    import_high_use_tariff = IMPORT_ECONOMIC["fixed_tariff_high_grid_use_rp_per_kwh"]
-    import_low_use_tariff = IMPORT_ECONOMIC["fixed_tariff_low_grid_use_rp_per_kwh"]
-    export_high_use_tariff = EXPORT_ECONOMIC["fixed_tariff_high_grid_use_rp_per_kwh"]
-    export_low_use_tariff = EXPORT_ECONOMIC["fixed_tariff_low_grid_use_rp_per_kwh"]
-    power_tariff_high_use = IMPORT_ECONOMIC["power_tariff_high_grid_use_rp_per_kw_per_month"]
-    power_tariff_low_use = IMPORT_ECONOMIC["power_tariff_low_grid_use_rp_per_kw_per_month"]
-    annual_grid_use_threshold_kwh = (
-        EXPORT_ECONOMIC["annual_grid_use_threshold_h"]
-        * EXPORT_TECHNICAL["existing_grid_limit_mw"]
-        * 1000.0
-    )
-    annual_grid_use_upper_bound_kwh = (
-        2.0
-        * n
-        * EXPORT_TECHNICAL["existing_grid_limit_mw"]
-        * 1000.0
-        * GENERAL["delta_t_h"]
-    )
+    import_fixed_tariff = IMPORT_ECONOMIC["fixed_tariff_high_grid_use_rp_per_kwh"]
+    export_fixed_tariff = EXPORT_ECONOMIC["fixed_tariff_high_grid_use_rp_per_kwh"]
+    import_power_tariff = IMPORT_ECONOMIC["power_tariff_high_grid_use_rp_per_kw_per_month"]
+    export_power_tariff = EXPORT_ECONOMIC["power_tariff_high_grid_use_rp_per_kw_per_month"]
 
     if objective_mode == "cost":
         ptes_cost_var = model.addVar(lb=0.0, vtype=GRB.CONTINUOUS, name="ptes_annual_cost_rp")
         add_ptes_cost_constraint(model, ptes_volume, ptes_cost_var)
 
-        # Add piecewise linear heat pump cost (amortized annual CAPEX)
+        # Small throughput penalty to discourage excessive PTES cycling
+        ptes_throughput_penalty = PTES_ECONOMIC.get("throughput_penalty_rp_per_kwh", 0.0)
+        ptes_throughput_cost = gp.quicksum(
+            ptes_throughput_penalty * (vars_dict["ptes_charge_kWhth"][t] + vars_dict["ptes_discharge_kWhth"][t])
+            for t in range(n)
+        )
+
+        # Add piecewise linear heat pump cost (amortized annual CAPEX) for nominal thermal power
         heatpump_capex_var = model.addVar(lb=0.0, vtype=GRB.CONTINUOUS, name="heatpump_annual_capex_rp")
-        add_heatpump_cost_constraint(model, heatpump_nominal, heatpump_capex_var)
+        add_heatpump_cost_constraint(model, heatpump_nominal_kwth, heatpump_capex_var)
         
         # Amortize the CAPEX over the heat pump lifetime
         heatpump_lifetime_years = HEAT_PUMP_ECONOMIC["heatpump_lifetime_years"]
         heatpump_annual_capex_amortized = heatpump_capex_var / heatpump_lifetime_years
-
-        annual_grid_use_kwh = gp.quicksum(
-            grid_import[t] + grid_export[t] for t in range(n)
-        )
-        annual_export_kwh = gp.quicksum(grid_export[t] for t in range(n))
-        export_low_grid_use = model.addVar(
-            vtype=GRB.BINARY, name="export_low_grid_use_tariff_active"
-        )
-        model.addConstr(
-            annual_grid_use_kwh
-            <= annual_grid_use_threshold_kwh
-            + annual_grid_use_upper_bound_kwh * (1 - export_low_grid_use),
-            name="export_low_grid_use_upper_bound",
-        )
-        model.addConstr(
-            annual_grid_use_kwh
-            >= annual_grid_use_threshold_kwh
-            - annual_grid_use_upper_bound_kwh * export_low_grid_use,
-            name="export_low_grid_use_lower_bound",
-        )
 
         prod_for_local = vars_dict["prod_for_local_demand"]
         local_production_revenue = gp.quicksum(
@@ -230,7 +203,7 @@ def add_objective(
             for t in range(n)
         )
         export_revenue = gp.quicksum(
-            grid_export[t] * (spot_price_rp_per_kwh[t] - export_high_use_tariff)
+            grid_export[t] * (spot_price_rp_per_kwh[t] - export_fixed_tariff)
             for t in range(n)
         )
         thermal_revenue = gp.quicksum(
@@ -243,7 +216,7 @@ def add_objective(
         )
 
         grid_import_cost = gp.quicksum(
-            grid_import[t] * (spot_price_rp_per_kwh[t] + import_high_use_tariff)
+            grid_import[t] * (spot_price_rp_per_kwh[t] + import_fixed_tariff)
             for t in range(n)
         )
         battery_cycling_cost = gp.quicksum(
@@ -253,15 +226,7 @@ def add_objective(
         woodchip_cost = gp.quicksum(
             woodchip_heat[t] * woodchip_cost_per_kwhth for t in range(n)
         )
-        tariff_adjustment_cost = (
-            (import_low_use_tariff - import_high_use_tariff) * export_low_grid_use * annual_grid_use_kwh
-            + (export_low_use_tariff - export_high_use_tariff - (import_low_use_tariff - import_high_use_tariff))
-            * export_low_grid_use * annual_export_kwh
-        )
-        power_tariff_cost = (
-            power_tariff_high_use
-            + (power_tariff_low_use - power_tariff_high_use) * export_low_grid_use
-        ) * gp.quicksum(
+        power_tariff_cost = export_power_tariff * gp.quicksum(
             monthly_peak_kw[month_label] for month_label in unique_month_labels
         )
         battery_fixed_cost = battery_installed * (battery_capex + battery_annual_opex)
@@ -278,11 +243,11 @@ def add_objective(
             grid_import_cost
             + battery_cycling_cost
             + woodchip_cost
-            + tariff_adjustment_cost
             + power_tariff_cost
             + battery_fixed_cost
             + heatpump_fixed_cost
             + ptes_storage_cost
+            + ptes_throughput_cost
         )
 
         annual_profit = annual_revenues - annual_costs

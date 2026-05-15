@@ -24,9 +24,9 @@ def build_figure(dataframe):
     ]
     elec_positive_series = [
         ("load_positive_kWh", "load_kWh"),
-        ("battery_charge_positive_kWh", "battery_charge_kWh"),
         ("grid_export_positive_kWh", "grid_export_kWh"),
         ("heatpump_elec_kWh", "heatpump_elec_kWh"),
+        ("battery_charge_positive_kWh", "battery_charge_kWh"),
     ]
 
     # Thermal series - woodchip boiler supply and heat demand

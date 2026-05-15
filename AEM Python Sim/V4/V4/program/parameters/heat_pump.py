@@ -17,9 +17,14 @@ minimum modulation level, and an inter-temporal ramp limit.
 HEAT_PUMP_TECHNICAL = {
     # Monthly COP profile (Jan-Dec), used as COP[m(t)] in the operating equations.
     "cop_monthly": [2.95, 2.9, 3.05, 3.2, 3.35, 3.55, 3.85, 3.85, 3.7, 3.55, 3.35, 3.1],
+    
+    # If True, enforce inter-temporal ramping on the electrical input.
+    # Relaxing this can improve solver speed for large problems.
+    "enforce_hp_ramping": True,
     # Maximum change in electric input per timestep [kWh_el per timestep].
     # This creates a continuous ramping limit between adjacent timesteps.
-    "ramp_limit_kwh_per_timestep": 0.125,
+    # Only active when enforce_hp_ramping=True.
+    "ramp_limit_kwh_per_timestep": 0.25,
     
     # If True, enforce exact on/off modulation with a binary variable.
     # Kept False by default so full-year solves remain tractable.
@@ -47,9 +52,9 @@ HEAT_PUMP_EMISSIONS = {
 # =============================================================================
 # NONLINEAR COST FUNCTION FOR VARIABLE CAPACITY HEAT PUMP
 # =============================================================================
-# Power-law function: CAPEX [CHF] = 1100 * (Q_nominal / 100)^(-0.46)
+# Power-law function for nominal thermal power sizing: CAPEX [CHF] = 1100 * (Q_nominal / 100)^(-0.46)
 # This represents economies of scale in heat pump installation costs.
-# Output: specific cost in CHF/kW, multiply by Q_nominal for total CAPEX.
+# Output: specific cost in CHF/kW, multiply by nominal thermal power Q_nominal [kW_th] for total CAPEX.
 
 HEAT_PUMP_NONLINEAR = {
     # Power-law coefficients (Q in kWth, cost in CHF)

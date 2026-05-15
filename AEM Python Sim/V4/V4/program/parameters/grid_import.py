@@ -24,15 +24,11 @@ def annual_grid_use_hours(total_import_kwh, total_export_kwh):
 
 
 def import_fixed_tariff_rp_per_kwh(annual_grid_use_h):
-    if annual_grid_use_h > IMPORT_ECONOMIC["annual_grid_use_threshold_h"]:
-        return IMPORT_ECONOMIC["fixed_tariff_high_grid_use_rp_per_kwh"]
-    return IMPORT_ECONOMIC["fixed_tariff_low_grid_use_rp_per_kwh"]
+    return IMPORT_ECONOMIC["fixed_tariff_high_grid_use_rp_per_kwh"]
 
 
 def power_tariff_rp_per_kw_per_month(annual_grid_use_h):
-    if annual_grid_use_h > IMPORT_ECONOMIC["annual_grid_use_threshold_h"]:
-        return IMPORT_ECONOMIC["power_tariff_high_grid_use_rp_per_kw_per_month"]
-    return IMPORT_ECONOMIC["power_tariff_low_grid_use_rp_per_kw_per_month"]
+    return IMPORT_ECONOMIC["power_tariff_high_grid_use_rp_per_kw_per_month"]
 
 
 def import_price_rp_per_kwh(spot_price_rp_per_kwh, annual_grid_use_h):

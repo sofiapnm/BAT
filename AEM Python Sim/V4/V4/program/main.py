@@ -16,7 +16,7 @@ from results import (
 
 
 # Set optimization horizon end month directly here (1-12), or None for full year.
-OPTIMIZATION_END_MONTH = 7
+OPTIMIZATION_END_MONTH = None
 
 
 def _resolve_objective_mode():
