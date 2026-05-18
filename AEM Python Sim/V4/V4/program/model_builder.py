@@ -25,9 +25,6 @@ def build_model(
 
     model = gp.Model(GENERAL["solver_name"])
     model.Params.OutputFlag = GENERAL["gurobi_output_flag"]
-    time_limit_s = GENERAL.get("solver_time_limit_s", None)
-    if time_limit_s is not None:
-        model.Params.TimeLimit = float(time_limit_s)
 
     vars_dict = add_variables(model, n)
     month_labels = pd.to_datetime(datetime_series).dt.to_period("M").astype(str).tolist()
@@ -116,17 +113,6 @@ def solve_model(model, objective_mode="unknown"):
     model.optimize()
 
     if model.Status == GRB.OPTIMAL:
-        return model
-
-    if (
-        model.Status == GRB.TIME_LIMIT
-        and model.SolCount > 0
-        and GENERAL.get("accept_time_limit_solution", True)
-    ):
-        print(
-            f"Warning: {objective_mode} hit time limit; using best incumbent "
-            f"(MIPGap={model.MIPGap:.4f}, ObjVal={model.ObjVal:.6g})."
-        )
         return model
 
     if model.Status != GRB.OPTIMAL:

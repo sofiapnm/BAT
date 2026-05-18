@@ -1,6 +1,6 @@
 #for capacity of 1-2MW, the following economic costs can be considered as correct
 #TECHNICAL AND EMISSION FACTORS HAVE TO BE REVISED
-BATTERY_MODE = "always_off"
+BATTERY_MODE = "optional"
 #options for battery mode: optional, always_on, always_off
 
 BATTERY_TECHNICAL = {

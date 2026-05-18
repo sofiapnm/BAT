@@ -14,7 +14,7 @@ GENERAL = {
     "pareto_output_path": str(RESULTS_DIR / "Pareto Front Results.csv"),
     "delta_t_h": 0.25,  # 15 minutes
     "solver_name": "gurobi",
-    "gurobi_output_flag": 0,
+    "gurobi_output_flag": 0,  # Enable output to see what's happening
     "pareto_num_points": 4,
     "emissions_penalty": 0.0,  # 120 CHF/ton CO2eq. for thermal fuels
 

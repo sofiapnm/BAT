@@ -20,7 +20,7 @@ HEAT_PUMP_TECHNICAL = {
     
     # If True, enforce inter-temporal ramping on the electrical input.
     # Relaxing this can improve solver speed for large problems.
-    "enforce_hp_ramping": False,
+    "enforce_hp_ramping": True,
     # Maximum change in electric input per timestep [kWh_el per timestep].
     # This creates a continuous ramping limit between adjacent timesteps.
     # Only active when enforce_hp_ramping=True.
@@ -28,7 +28,7 @@ HEAT_PUMP_TECHNICAL = {
     
     # If True, enforce exact on/off modulation with a binary variable.
     # Kept False by default so full-year solves remain tractable.
-    "enforce_modulation_binary": True,
+    "enforce_modulation_binary": False,
     # Minimum stable electric input fraction while running [0..1].
     # Only active when enforce_modulation_binary=True.
     "modulation_min_frac": 0.2,
