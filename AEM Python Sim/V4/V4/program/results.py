@@ -26,6 +26,7 @@ from parameters.ptes import PTES_TECHNICAL, PTES_ECONOMIC, PTES_EMISSIONS
 
 def extract_solution(vars_dict, n):
     battery_installed = float(vars_dict["battery_installed"].X)
+    battery_capacity = float(vars_dict["battery_capacity_kwh"].X) if "battery_capacity_kwh" in vars_dict else BATTERY_TECHNICAL["capacity_kwh"]
     heatpump_nominal = float(
         vars_dict.get("heatpump_nominal_kwth", vars_dict.get("heatpump_nominal_kWhth")).X
     )
@@ -38,6 +39,7 @@ def extract_solution(vars_dict, n):
     return pd.DataFrame(
         {
             "battery_installed": [battery_installed for _ in range(n)],
+            "battery_capacity_kwh": [battery_capacity for _ in range(n)],
             "grid_import_kWh": [vars_dict["grid_import"][t].X for t in range(n)],
             "grid_export_kWh": [vars_dict["grid_export"][t].X for t in range(n)],
             "battery_charge_kWh": [vars_dict["batt_charge"][t].X for t in range(n)],
@@ -132,11 +134,11 @@ def build_results_table(
     for col in sol_emis.columns:
         results[f"emissions_opt__{col}"] = sol_emis[col].values
 
-    battery_capacity_kwh = BATTERY_TECHNICAL["capacity_kwh"]
-    battery_capex = BATTERY_ECONOMIC["annual_capex_rp_per_kwh_amortized"] * battery_capacity_kwh
-    battery_annual_opex = (
-        BATTERY_ECONOMIC["annual_opex_rp_per_kwh_year"] * battery_capacity_kwh
-    )
+    # Use chosen capacity from solution (kWh) and per-kWh economic params
+    battery_capacity_kwh_cost = float(sol_cost["battery_capacity_kwh"].iloc[0]) if "battery_capacity_kwh" in sol_cost else BATTERY_TECHNICAL["capacity_kwh"]
+    battery_capacity_kwh_emis = float(sol_emis["battery_capacity_kwh"].iloc[0]) if "battery_capacity_kwh" in sol_emis else BATTERY_TECHNICAL["capacity_kwh"]
+    battery_capex = BATTERY_ECONOMIC["annual_capex_rp_per_kwh_amortized"]
+    battery_annual_opex = BATTERY_ECONOMIC["annual_opex_rp_per_kwh_year"]
     battery_degradation_cost = BATTERY_ECONOMIC["degradation_cost_rp_per_kwh_throughput"]
     grid_emissions = IMPORT_EMISSIONS["grid_emissions_kgco2_per_kwh"]
     export_emissions = EXPORT_EMISSIONS["export_emissions_kgco2_per_kwh"]
@@ -149,8 +151,7 @@ def build_results_table(
 
     spot_price_series = pd.Series(spot_price, index=results.index, dtype=float)
     production_series = pd.Series(production, index=results.index, dtype=float)
-    battery_installed_cost = float(sol_cost["battery_installed"].iloc[0]) if "battery_installed" in sol_cost else 1.0
-    battery_installed_emis = float(sol_emis["battery_installed"].iloc[0]) if "battery_installed" in sol_emis else 1.0
+    # Annual fixed cost scales with chosen capacity (kWh)
     annual_grid_use_hours_cost = annual_import_grid_use_hours(
         sol_cost["grid_import_kWh"].sum(),
         sol_cost["grid_export_kWh"].sum(),
@@ -165,8 +166,8 @@ def build_results_table(
     first_step_in_month = ~month_labels.duplicated()
     monthly_power_cost_cost = month_labels.map(monthly_peak_cost).astype(float) * power_tariff_cost
     monthly_power_cost_emis = month_labels.map(monthly_peak_emis).astype(float) * power_tariff_emis
-    annual_battery_fixed_cost_cost = (battery_capex + battery_annual_opex) * battery_installed_cost
-    annual_battery_fixed_cost_emis = (battery_capex + battery_annual_opex) * battery_installed_emis
+    annual_battery_fixed_cost_cost = (battery_capex + battery_annual_opex) * battery_capacity_kwh_cost
+    annual_battery_fixed_cost_emis = (battery_capex + battery_annual_opex) * battery_capacity_kwh_emis
     cost_local_demand_series = pd.Series(
         sol_cost["prod_for_local_demand_kWh"], index=results.index, dtype=float
     )
@@ -402,11 +403,6 @@ def summarize_solution(
     spot_price,
     monthly_peak,
 ):
-    battery_capacity_kwh = BATTERY_TECHNICAL["capacity_kwh"]
-    battery_capex = BATTERY_ECONOMIC["annual_capex_rp_per_kwh_amortized"] * battery_capacity_kwh
-    battery_annual_opex = (
-        BATTERY_ECONOMIC["annual_opex_rp_per_kwh_year"] * battery_capacity_kwh
-    )
     battery_degradation_cost = BATTERY_ECONOMIC["degradation_cost_rp_per_kwh_throughput"]
     grid_emissions = IMPORT_EMISSIONS["grid_emissions_kgco2_per_kwh"]
     export_emissions = EXPORT_EMISSIONS["export_emissions_kgco2_per_kwh"]
@@ -422,13 +418,13 @@ def summarize_solution(
 
     spot_price_series = pd.Series(spot_price, dtype=float)
     production_series = pd.Series(production, dtype=float)
-    battery_installed = float(solution["battery_installed"].iloc[0]) if "battery_installed" in solution else 1.0
+    battery_capacity = float(solution["battery_capacity_kwh"].iloc[0]) if "battery_capacity_kwh" in solution else BATTERY_TECHNICAL["capacity_kwh"]
     annual_import_kwh = float(solution["grid_import_kWh"].sum())
     annual_export_kwh = float(solution["grid_export_kWh"].sum())
     annual_grid_use_h = annual_import_grid_use_hours(annual_import_kwh, annual_export_kwh)
     power_tariff = power_tariff_rp_per_kw_per_month(annual_grid_use_h)
     annual_power_cost_rp = float(monthly_peak.astype(float).sum() * power_tariff)
-    annual_battery_fixed_cost_rp = (battery_capex + battery_annual_opex) * battery_installed
+    annual_battery_fixed_cost_rp = (BATTERY_ECONOMIC["annual_capex_rp_per_kwh_amortized"] + BATTERY_ECONOMIC["annual_opex_rp_per_kwh_year"]) * battery_capacity
     annual_runofriver_profit_rp = float(
         solution["prod_for_local_demand_kWh"].sum() * runofriver_profit_per_kwh
     )

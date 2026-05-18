@@ -158,11 +158,12 @@ def add_objective(
     monthly_peak_kw = vars_dict["monthly_peak_kw"]
     unique_month_labels = vars_dict["unique_month_labels"]
 
-    battery_capacity_kwh = BATTERY_TECHNICAL["capacity_kwh"]
-    battery_capex = BATTERY_ECONOMIC["annual_capex_rp_per_kwh_amortized"] * battery_capacity_kwh
-    battery_annual_opex = (
-        BATTERY_ECONOMIC["annual_opex_rp_per_kwh_year"] * battery_capacity_kwh
-    )
+    # Use the sizing variable for battery capacity when computing fixed costs
+    battery_capacity_var = vars_dict.get("battery_capacity_kwh")
+    per_kwh_capex = BATTERY_ECONOMIC["annual_capex_rp_per_kwh_amortized"]
+    per_kwh_opex = BATTERY_ECONOMIC["annual_opex_rp_per_kwh_year"]
+    battery_capex = per_kwh_capex
+    battery_annual_opex = per_kwh_opex
     battery_degradation_cost = BATTERY_ECONOMIC["degradation_cost_rp_per_kwh_throughput"]
     grid_emissions = IMPORT_EMISSIONS["grid_emissions_kgco2_per_kwh"]
     export_emissions = EXPORT_EMISSIONS["export_emissions_kgco2_per_kwh"]
@@ -229,7 +230,15 @@ def add_objective(
     power_tariff_cost = export_power_tariff * gp.quicksum(
         monthly_peak_kw[month_label] for month_label in unique_month_labels
     )
-    battery_fixed_cost = battery_installed * (battery_capex + battery_annual_opex)
+    # Battery fixed cost scales linearly with chosen capacity (kWh)
+    if battery_capacity_var is not None:
+        battery_fixed_cost = battery_capacity_var * (battery_capex + battery_annual_opex)
+    else:
+        # Fallback to previous behavior using installed flag and nominal capacity
+        battery_capacity_kwh = BATTERY_TECHNICAL["capacity_kwh"]
+        battery_fixed_cost = battery_installed * (
+            battery_capex * battery_capacity_kwh + battery_annual_opex * battery_capacity_kwh
+        )
     # Heat pump costs from piecewise linear CAPEX approximation
     # OPEX is calculated as a percentage of the variable CAPEX
     heatpump_opex_cost = heatpump_capex_var * heatpump_opex_percentage

@@ -25,6 +25,24 @@ def add_variables(model, n):
     else:
         raise ValueError(f"Unknown BATTERY_MODE: {BATTERY_MODE}")
 
+    # Battery capacity sizing variable [kWh]
+    cap_min = BATTERY_TECHNICAL.get("capacity_kwh_min", BATTERY_TECHNICAL["capacity_kwh"])
+    cap_max = BATTERY_TECHNICAL.get("capacity_kwh_max", BATTERY_TECHNICAL["capacity_kwh"])
+    vars_dict["battery_capacity_kwh"] = model.addVar(
+        lb=0.0, ub=cap_max, vtype=GRB.CONTINUOUS, name="battery_capacity_kwh"
+    )
+
+    # Link capacity to install decision: if not installed capacity == 0,
+    # if installed enforce min capacity and allow up to max.
+    model.addConstr(
+        vars_dict["battery_capacity_kwh"] <= vars_dict["battery_installed"] * cap_max,
+        name="battery_capacity_upper_if_installed",
+    )
+    model.addConstr(
+        vars_dict["battery_capacity_kwh"] >= vars_dict["battery_installed"] * cap_min,
+        name="battery_capacity_lower_if_installed",
+    )
+
     vars_dict["grid_import"] = model.addVars(
         n, lb=0.0, vtype=GRB.CONTINUOUS, name="grid_import"
     )
@@ -47,15 +65,11 @@ def add_variables(model, n):
             n, vtype=GRB.BINARY, name="batt_charge_mode"
         )
 
-    soc_lb = BATTERY_TECHNICAL["soc_min_frac"] * BATTERY_TECHNICAL["capacity_kwh"]
-    soc_ub = BATTERY_TECHNICAL["soc_max_frac"] * BATTERY_TECHNICAL["capacity_kwh"]
-
+    # SOC variables: allow up to the maximum possible capacity
+    cap_max = BATTERY_TECHNICAL.get("capacity_kwh_max", BATTERY_TECHNICAL["capacity_kwh"])
     vars_dict["soc"] = model.addVars(
-        n, lb=0.0, ub=soc_ub, vtype=GRB.CONTINUOUS, name="soc"
+        n, lb=0.0, ub=cap_max, vtype=GRB.CONTINUOUS, name="soc"
     )
-
-    vars_dict["soc_min_kwh"] = soc_lb
-    vars_dict["soc_max_kwh"] = soc_ub
 
     # Production allocated to meet local demand (remainder goes to export/battery)
     vars_dict["prod_for_local_demand"] = model.addVars(

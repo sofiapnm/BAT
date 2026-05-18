@@ -4,13 +4,15 @@ BATTERY_MODE = "optional"
 #options for battery mode: optional, always_on, always_off
 
 BATTERY_TECHNICAL = {
-    "capacity_kwh": 10000.0, 
+    "capacity_kwh": 20000.0, 
+    "capacity_kwh_min": 2000.0,
+    "capacity_kwh_max": 20000.0,
     "soc_min_frac": 0.05,
     "soc_max_frac": 0.95,
     "soc_init_frac": 0.50,
     "soc_end_frac": 0.50,
-    "max_charge_power_kw": 5000.0, #ask bkw for details?
-    "max_discharge_power_kw": 5000.0, #ask bkw for details?
+    "max_charge_power_kw": 10000.0, #ask bkw for details?
+    "max_discharge_power_kw": 10000.0, #ask bkw for details?
     "charge_eff": 0.95,
     "discharge_eff": 0.95,
 }
