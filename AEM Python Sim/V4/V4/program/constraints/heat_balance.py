@@ -120,10 +120,10 @@ def add_heat_balance_constraints(model, vars_dict, heatdemand_kwhth, n, datetime
         # turndown level. When disabled, the model is continuously modulating.
         if enforce_modulation_binary and heatpump_on is not None:
             model.addConstr(
-                heatpump_elec[t] <= (heatpump_nominal_kwth / cop_t) * heatpump_on[t]
+                heatpump_elec[t] <= (heatpump_nominal_kwth / cop_t) * heatpump_on[t] * delta_t_h
             )
             model.addConstr(
-                heatpump_elec[t] >= modulation_min_frac * (heatpump_nominal_kwth / cop_t) * heatpump_on[t]
+                heatpump_elec[t] >= modulation_min_frac * (heatpump_nominal_kwth / cop_t) * heatpump_on[t] * delta_t_h
             )
 
         # ===== PTES STATE OF CHARGE DYNAMICS =====

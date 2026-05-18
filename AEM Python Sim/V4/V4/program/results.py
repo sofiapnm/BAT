@@ -49,7 +49,7 @@ def extract_solution(vars_dict, n):
             "heatpump_elec_kWh": [vars_dict["heatpump_elec_kWh"][t].X for t in range(n)],
             "heatpump_on": heatpump_on_vals,
             "heatpump_nominal_kwth": [heatpump_nominal for _ in range(n)],
-            "heatpump_nominal_kWhth": [heatpump_nominal for _ in range(n)],
+            "heatpump_nominal_kWhth": [heatpump_nominal * GENERAL["delta_t_h"] for _ in range(n)],
             "Q_HP_kWhth": [vars_dict["heatpump_heat_kWhth"][t].X for t in range(n)],
             "E_elec_HP_kWh": [vars_dict["heatpump_elec_kWh"][t].X for t in range(n)],
             "ptes_charge_kWhth": [vars_dict["ptes_charge_kWhth"][t].X for t in range(n)],
@@ -370,6 +370,7 @@ def build_results_table(
         - results["emissions_opt__thermal_revenue_rp"]
         + results["emissions_opt__monthly_power_tariff_rp"]
         + results["emissions_opt__battery_fixed_cost_rp"]
+        + results["emissions_opt__heatpump_fixed_cost_rp"]
         + results["emissions_opt__ptes_fixed_cost_rp"]
     )
 
