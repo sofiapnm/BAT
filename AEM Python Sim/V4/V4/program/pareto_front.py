@@ -50,11 +50,11 @@ def reconstruct_monthly_peak(results, solution_prefix):
 
 
 def load_anchor_summaries():
-    kwh_path = Path(GENERAL["kwh_output_path"])
+    kwh_path = Path("/workspaces/BAT/AEM Python Sim/V4/V4/results/cost_opt kWh Results.csv")
     output_path = Path(GENERAL["output_path"])
     if not kwh_path.exists() or not output_path.exists():
         raise FileNotFoundError(
-            "Run main.py first so both annual result files are available."
+            f"Run main.py first so {kwh_path.name} and {output_path.name} are available."
         )
 
     kwh_results = pd.read_csv(kwh_path, parse_dates=["DateTime"])

@@ -2,6 +2,7 @@ from data_loader import load_input_data
 import pandas as pd
 import numpy as np
 import sys
+from pathlib import Path
 from model_builder import build_model, solve_model
 from parameters.battery import BATTERY_TECHNICAL
 from parameters.general import GENERAL
@@ -135,7 +136,12 @@ def main():
         monthly_peak_emis=monthly_peak_emis,
     )
 
-    save_results(kwh_results, GENERAL["kwh_output_path"])
+
+    if objective_mode == "cost":
+        kwh_out = "/workspaces/BAT/AEM Python Sim/V4/V4/results/cost_opt kWh Results.csv"
+    else:
+        kwh_out = "/workspaces/BAT/AEM Python Sim/V4/V4/results/emis_opt kWh Results.csv"
+    save_results(kwh_results, kwh_out)
     save_results(results, GENERAL["output_path"])
     print_summary(results, GENERAL["output_path"])
     print("Done.")

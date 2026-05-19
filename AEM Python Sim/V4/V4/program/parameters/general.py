@@ -20,6 +20,6 @@ GENERAL = {
 
     # Optional exclusivity binaries (set False to reduce model size/solve time).
     "use_grid_exclusivity": False,
-    "use_battery_exclusivity": False,
+    "use_battery_exclusivity": True,
     "use_ptes_exclusivity": False,
 }
