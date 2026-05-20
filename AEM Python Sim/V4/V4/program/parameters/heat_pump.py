@@ -45,7 +45,11 @@ HEAT_PUMP_ECONOMIC = {
 
 HEAT_PUMP_EMISSIONS = {
     # Direct operational emissions factor on useful heat output.
-    "emissions_kgco2eq_per_kwhth": 0.148,
+    "emissions_kgco2eq_per_kwhth": 0.0208,
+    # Optional electricity-source emissions factor for the heat pump input.
+    # If left as None, the model defaults to the grid factor in the objective
+    # and results reporting can derive a scenario-specific source mix factor.
+    "electricity_source_emissions_kgco2_per_kwh": None,
 }
 
 
@@ -134,3 +138,26 @@ def generate_heatpump_cost_breakpoints():
     
     cost_breakpoints = [heatpump_total_cost_rp(q) for q in q_breakpoints]
     return q_breakpoints, cost_breakpoints
+
+
+def heatpump_cop_profile(datetime_series):
+    """Return the month-matched COP profile for a datetime series."""
+    import pandas as pd
+
+    cop_monthly = HEAT_PUMP_TECHNICAL["cop_monthly"]
+    months = pd.to_datetime(datetime_series).dt.month.values
+    return [cop_monthly[int(m) - 1] if not pd.isna(m) else cop_monthly[0] for m in months]
+
+
+def heatpump_total_emissions_kgco2(heat_kwhth, cop, direct_factor=None, electricity_source_factor=None):
+    """Compute total heat-pump emissions for one timestep or scalar input."""
+    if cop <= 0:
+        raise ValueError("COP must be positive to compute heat-pump emissions.")
+
+    if direct_factor is None:
+        direct_factor = HEAT_PUMP_EMISSIONS["emissions_kgco2eq_per_kwhth"]
+
+    if electricity_source_factor is None:
+        electricity_source_factor = 0.0
+
+    return heat_kwhth * (direct_factor + electricity_source_factor / cop)

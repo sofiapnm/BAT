@@ -34,12 +34,12 @@ def get_csv_path_and_label(objective_mode):
     results_dir = "/workspaces/BAT/AEM Python Sim/V4/V4/results"
     if objective_mode == "cost":
         return (
-            f"{results_dir}/cost_opt kWh Results.csv",
+            f"{results_dir}/cost_opt kWh results.csv",
             "cost-optimized solution",
         )
     else:
         return (
-            f"{results_dir}/emis_opt kWh Results.csv",
+            f"{results_dir}/emis_opt kWh results.csv",
             "emissions-optimized solution",
         )
 

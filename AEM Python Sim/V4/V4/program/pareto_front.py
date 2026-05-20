@@ -88,6 +88,7 @@ def load_anchor_summaries():
         heatdemand=kwh_results["heatdemand_kWhth"],
         spot_price=kwh_results["spot price [Rp/kWh]"],
         monthly_peak=monthly_peak_cost,
+        datetime_series=kwh_results["DateTime"],
     )
     emissions_summary = summarize_solution(
         solution=emissions_solution,
@@ -95,6 +96,7 @@ def load_anchor_summaries():
         heatdemand=kwh_results["heatdemand_kWhth"],
         spot_price=kwh_results["spot price [Rp/kWh]"],
         monthly_peak=monthly_peak_emis,
+        datetime_series=kwh_results["DateTime"],
     )
 
     return kwh_results, results, cost_summary, emissions_summary
@@ -151,6 +153,7 @@ def main():
             heatdemand=heatdemand,
             spot_price=spot_price,
             monthly_peak=monthly_peak_pareto,
+            datetime_series=datetime_series,
         )
         pareto_rows.append(
             {

@@ -75,6 +75,7 @@ def build_model(
         vars_dict=vars_dict,
         production_kwh=production_kwh,
         n=n,
+        datetime_series=datetime_series,
     )
     vars_dict["annual_emissions_expr"] = annual_emissions_expr
 
@@ -92,6 +93,7 @@ def build_model(
         spot_price_rp_per_kwh=spot_price_rp_per_kwh,
         objective_mode=objective_mode,
         n=n,
+        datetime_series=datetime_series,
     )
 
     delta_t_h = GENERAL["delta_t_h"]

@@ -1,5 +1,6 @@
 import gurobipy as gp
 from gurobipy import GRB
+import pandas as pd
 
 from parameters.battery import BATTERY_ECONOMIC, BATTERY_TECHNICAL
 from parameters.grid_import import IMPORT_ECONOMIC, IMPORT_EMISSIONS
@@ -8,7 +9,10 @@ from parameters.grid_export import EXPORT_ECONOMIC, EXPORT_EMISSIONS, EXPORT_TEC
 from parameters.heat_pump import (
     HEAT_PUMP_ECONOMIC,
     HEAT_PUMP_EMISSIONS,
+    HEAT_PUMP_TECHNICAL,
     generate_heatpump_cost_breakpoints,
+    heatpump_cop_profile,
+    heatpump_total_emissions_kgco2,
 )
 from parameters.runofriver import RUNOFRIVER_ECONOMIC, RUNOFRIVER_EMISSIONS
 from parameters.woodchip_boiler import WOODCHIP_BOILER_ECONOMIC, WOODCHIP_BOILER_EMISSIONS
@@ -116,7 +120,7 @@ def add_heatpump_cost_constraint(model, heatpump_nominal_kwth, heatpump_cost_var
     )
 
 
-def build_annual_emissions_expr(vars_dict, production_kwh, n):
+def build_annual_emissions_expr(vars_dict, production_kwh, n, datetime_series=None):
     grid_import = vars_dict["grid_import"]
     grid_export = vars_dict["grid_export"]
     woodchip_heat = vars_dict["woodchip_boiler_heat_kWhth"]
@@ -126,12 +130,27 @@ def build_annual_emissions_expr(vars_dict, production_kwh, n):
     runofriver_emissions_per_kwh = RUNOFRIVER_EMISSIONS["emissions_kgco2eq_per_kwh_generated"]
     woodchip_emissions_per_kwhth = WOODCHIP_BOILER_EMISSIONS["emissions_kgco2eq_per_kwhth"]
     ptes_emissions_per_m3 = PTES_EMISSIONS["emissions_kgco2eq_per_m3"]
+    heatpump_heat = vars_dict["heatpump_heat_kWhth"]
+
+    electricity_source_emissions = HEAT_PUMP_EMISSIONS.get(
+        "electricity_source_emissions_kgco2_per_kwh"
+    )
+    if electricity_source_emissions is None:
+        electricity_source_emissions = grid_emissions
+
+    cop_profile = heatpump_cop_profile(datetime_series) if datetime_series is not None else [HEAT_PUMP_TECHNICAL["cop_monthly"][0]] * n
 
     return gp.quicksum(
         grid_import[t] * grid_emissions
         + grid_export[t] * export_emissions
         + production_kwh[t] * runofriver_emissions_per_kwh
         + woodchip_heat[t] * woodchip_emissions_per_kwhth
+        + heatpump_total_emissions_kgco2(
+            heatpump_heat[t],
+            cop_profile[t],
+            direct_factor=HEAT_PUMP_EMISSIONS["emissions_kgco2eq_per_kwhth"],
+            electricity_source_factor=electricity_source_emissions,
+        )
         for t in range(n)
     ) + ptes_volume * ptes_emissions_per_m3  # Annual PTES embodied emissions
 
@@ -145,6 +164,7 @@ def add_objective(
     spot_price_rp_per_kwh,
     objective_mode,
     n,
+    datetime_series=None,
 ):
     grid_import = vars_dict["grid_import"]
     grid_export = vars_dict["grid_export"]
@@ -174,6 +194,12 @@ def add_objective(
     heatpump_lifetime_years = HEAT_PUMP_ECONOMIC["heatpump_lifetime_years"]
     heatpump_opex_percentage = HEAT_PUMP_ECONOMIC["annual_opex_percentage_of_capex"]
     heatpump_emissions_per_kwhth = HEAT_PUMP_EMISSIONS["emissions_kgco2eq_per_kwhth"]
+    heatpump_electricity_source_emissions = HEAT_PUMP_EMISSIONS.get(
+        "electricity_source_emissions_kgco2_per_kwh"
+    )
+    if heatpump_electricity_source_emissions is None:
+        heatpump_electricity_source_emissions = grid_emissions
+    cop_profile = heatpump_cop_profile(datetime_series) if datetime_series is not None else [HEAT_PUMP_TECHNICAL["cop_monthly"][0]] * n
     import_fixed_tariff = IMPORT_ECONOMIC["fixed_tariff_high_grid_use_rp_per_kwh"]
     export_fixed_tariff = EXPORT_ECONOMIC["fixed_tariff_high_grid_use_rp_per_kwh"]
     import_power_tariff = IMPORT_ECONOMIC["power_tariff_high_grid_use_rp_per_kw_per_month"]
@@ -264,8 +290,11 @@ def add_objective(
     if objective_mode == "cost":
         model.setObjective(annual_profit, GRB.MAXIMIZE)
     elif objective_mode == "emissions":
-        expr = build_annual_emissions_expr(vars_dict, production_kwh, n) + gp.quicksum(
-            heatpump_heat[t] * heatpump_emissions_per_kwhth for t in range(n)
+        expr = build_annual_emissions_expr(
+            vars_dict,
+            production_kwh,
+            n,
+            datetime_series=datetime_series,
         )
         model.setObjective(expr, GRB.MINIMIZE)
     else:

@@ -9,5 +9,5 @@ WOODCHIP_BOILER_ECONOMIC = {
 }
 
 WOODCHIP_BOILER_EMISSIONS = {
-    "emissions_kgco2eq_per_kwhth": 0.3272,
+    "emissions_kgco2eq_per_kwhth": 0.0164,
 }

@@ -138,9 +138,9 @@ def main():
 
 
     if objective_mode == "cost":
-        kwh_out = "/workspaces/BAT/AEM Python Sim/V4/V4/results/cost_opt kWh Results.csv"
+        kwh_out = "/workspaces/BAT/AEM Python Sim/V4/V4/results/cost_opt kWh results.csv"
     else:
-        kwh_out = "/workspaces/BAT/AEM Python Sim/V4/V4/results/emis_opt kWh Results.csv"
+        kwh_out = "/workspaces/BAT/AEM Python Sim/V4/V4/results/emis_opt kWh results.csv"
     save_results(kwh_results, kwh_out)
     save_results(results, GENERAL["output_path"])
     print_summary(results, GENERAL["output_path"])
