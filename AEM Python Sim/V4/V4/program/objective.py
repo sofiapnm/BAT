@@ -2,7 +2,7 @@ import gurobipy as gp
 from gurobipy import GRB
 import pandas as pd
 
-from parameters.battery import BATTERY_ECONOMIC, BATTERY_TECHNICAL
+from parameters.battery import BATTERY_ECONOMIC, BATTERY_EMISSIONS, BATTERY_TECHNICAL
 from parameters.grid_import import IMPORT_ECONOMIC, IMPORT_EMISSIONS
 from parameters.general import GENERAL
 from parameters.grid_export import EXPORT_ECONOMIC, EXPORT_EMISSIONS, EXPORT_TECHNICAL
@@ -123,10 +123,21 @@ def add_heatpump_cost_constraint(model, heatpump_nominal_kwth, heatpump_cost_var
 def build_annual_emissions_expr(vars_dict, production_kwh, n, datetime_series=None):
     grid_import = vars_dict["grid_import"]
     grid_export = vars_dict["grid_export"]
+    batt_charge = vars_dict["batt_charge"]
+    batt_discharge = vars_dict["batt_discharge"]
     woodchip_heat = vars_dict["woodchip_boiler_heat_kWhth"]
     ptes_volume = vars_dict["ptes_volume_m3"]
     grid_emissions = IMPORT_EMISSIONS["grid_emissions_kgco2_per_kwh"]
     export_emissions = EXPORT_EMISSIONS["export_emissions_kgco2_per_kwh"]
+    battery_lifecycle_emissions = BATTERY_EMISSIONS[
+        "lifecycle_emissions_kgco2_per_kwh_throughput"
+    ]
+    battery_throughput_penalty = BATTERY_EMISSIONS.get(
+        "battery_throughput_penalty_emissions", 0.0
+    )
+    battery_throughput_emissions = (
+        battery_lifecycle_emissions + battery_throughput_penalty
+    )
     runofriver_emissions_per_kwh = RUNOFRIVER_EMISSIONS["emissions_kgco2eq_per_kwh_generated"]
     woodchip_emissions_per_kwhth = WOODCHIP_BOILER_EMISSIONS["emissions_kgco2eq_per_kwhth"]
     ptes_emissions_per_m3 = PTES_EMISSIONS["emissions_kgco2eq_per_m3"]
@@ -143,6 +154,7 @@ def build_annual_emissions_expr(vars_dict, production_kwh, n, datetime_series=No
     return gp.quicksum(
         grid_import[t] * grid_emissions
         + grid_export[t] * export_emissions
+        + (batt_charge[t] + batt_discharge[t]) * battery_throughput_emissions
         + production_kwh[t] * runofriver_emissions_per_kwh
         + woodchip_heat[t] * woodchip_emissions_per_kwhth
         + heatpump_total_emissions_kgco2(

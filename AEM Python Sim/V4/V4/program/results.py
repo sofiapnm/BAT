@@ -162,6 +162,10 @@ def build_results_table(
     woodchip_emissions_per_kwhth = WOODCHIP_BOILER_EMISSIONS["emissions_kgco2eq_per_kwhth"]
     ptes_emissions_per_m3 = PTES_EMISSIONS["emissions_kgco2eq_per_m3"]
     battery_emissions_per_kwh = BATTERY_EMISSIONS["lifecycle_emissions_kgco2_per_kwh_throughput"]
+    battery_throughput_emissions_per_kwh = (
+        battery_emissions_per_kwh
+        + BATTERY_EMISSIONS.get("battery_throughput_penalty_emissions", 0.0)
+    )
 
     def heatpump_source_emissions_series(prefix):
         configured_factor = HEAT_PUMP_EMISSIONS.get("electricity_source_emissions_kgco2_per_kwh")
@@ -242,6 +246,20 @@ def build_results_table(
     results["emissions_opt__ptes_emissions_kgco2"] = 0.0
     results["cost_opt__heatpump_emissions_kgco2"] = 0.0
     results["emissions_opt__heatpump_emissions_kgco2"] = 0.0
+    results["cost_opt__battery_throughput_emissions_kgco2"] = (
+        (
+            results["cost_opt__battery_charge_kWh"]
+            + results["cost_opt__battery_discharge_kWh"]
+        )
+        * battery_throughput_emissions_per_kwh
+    )
+    results["emissions_opt__battery_throughput_emissions_kgco2"] = (
+        (
+            results["emissions_opt__battery_charge_kWh"]
+            + results["emissions_opt__battery_discharge_kWh"]
+        )
+        * battery_throughput_emissions_per_kwh
+    )
     results["cost_opt__woodchip_cost_rp"] = (
         cost_woodchip_heat_series * woodchip_cost_per_kwhth
     )
@@ -425,6 +443,7 @@ def build_results_table(
         + cost_woodchip_heat_series * woodchip_emissions_per_kwhth
         + results["cost_opt__heatpump_emissions_kgco2"]
         + results["cost_opt__ptes_emissions_kgco2"]
+        + results["cost_opt__battery_throughput_emissions_kgco2"]
     )
 
     results["emissions_opt__step_emissions_kgco2"] = (
@@ -434,6 +453,7 @@ def build_results_table(
         + emis_woodchip_heat_series * woodchip_emissions_per_kwhth
         + results["emissions_opt__heatpump_emissions_kgco2"]
         + results["emissions_opt__ptes_emissions_kgco2"]
+        + results["emissions_opt__battery_throughput_emissions_kgco2"]
     )
 
     return results
@@ -561,6 +581,13 @@ def summarize_solution(
             )).sum()
         )
     annual_ptes_emissions_kgco2 = annual_ptes_volume_m3 * ptes_emissions_per_m3
+    annual_battery_throughput_kwh = float(
+        solution["battery_charge_kWh"].sum() + solution["battery_discharge_kWh"].sum()
+    )
+    annual_battery_throughput_emissions_kgco2 = annual_battery_throughput_kwh * (
+        BATTERY_EMISSIONS["lifecycle_emissions_kgco2_per_kwh_throughput"]
+        + BATTERY_EMISSIONS.get("battery_throughput_penalty_emissions", 0.0)
+    )
     annual_thermal_revenue_rp = float(pd.Series(heatdemand, dtype=float).sum()) * thermal_revenue_per_kwhth
     battery_installed = clean_binary(solution["battery_installed"].iloc[0]) if "battery_installed" in solution else 0.0
     
@@ -585,6 +612,7 @@ def summarize_solution(
         + annual_woodchip_heat_kwhth * woodchip_emissions_per_kwhth
         + annual_heatpump_emissions_kgco2
         + annual_ptes_emissions_kgco2
+        + annual_battery_throughput_emissions_kgco2
     )
 
     return {
@@ -596,6 +624,7 @@ def summarize_solution(
         "annual_grid_use_h": annual_grid_use_h,
         "annual_battery_charge_kwh": float(solution["battery_charge_kWh"].sum()),
         "annual_battery_discharge_kwh": float(solution["battery_discharge_kWh"].sum()),
+        "annual_battery_throughput_emissions_kgco2": annual_battery_throughput_emissions_kgco2,
         "annual_woodchip_heat_kwhth": annual_woodchip_heat_kwhth,
         "annual_heatpump_heat_kwhth": annual_heatpump_heat_kwhth,
         "annual_heatpump_nominal_kwhth": annual_heatpump_nominal_kwhth,
