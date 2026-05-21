@@ -37,6 +37,7 @@ def clean_binary(value, tol=1e-6):
 
 def extract_solution(vars_dict, n):
     battery_installed = clean_binary(vars_dict["battery_installed"].X)
+    ptes_installed = clean_binary(vars_dict["ptes_installed"].X)
     battery_capacity = clean_zero(
         vars_dict["battery_capacity_kwh"].X
     ) if "battery_capacity_kwh" in vars_dict else BATTERY_TECHNICAL["capacity_kwh"]
@@ -52,6 +53,7 @@ def extract_solution(vars_dict, n):
     return pd.DataFrame(
         {
             "battery_installed": [battery_installed for _ in range(n)],
+            "ptes_installed": [ptes_installed for _ in range(n)],
             "battery_capacity_kwh": [battery_capacity for _ in range(n)],
             "grid_import_kWh": [vars_dict["grid_import"][t].X for t in range(n)],
             "grid_export_kWh": [vars_dict["grid_export"][t].X for t in range(n)],
@@ -590,6 +592,7 @@ def summarize_solution(
     )
     annual_thermal_revenue_rp = float(pd.Series(heatdemand, dtype=float).sum()) * thermal_revenue_per_kwhth
     battery_installed = clean_binary(solution["battery_installed"].iloc[0]) if "battery_installed" in solution else 0.0
+    ptes_installed = clean_binary(solution["ptes_installed"].iloc[0]) if "ptes_installed" in solution else 0.0
     
     # Calculate annual profit = revenues - costs (aligned with profit-maximization objective)
     annual_profit_rp = (
@@ -617,6 +620,7 @@ def summarize_solution(
 
     return {
         "battery_installed": battery_installed,
+        "ptes_installed": ptes_installed,
         "net_annual_profit_chf": net_annual_profit_chf,
         "annual_emissions_burden_kgco2": annual_emissions_burden_kgco2,
         "annual_grid_import_kwh": annual_import_kwh,

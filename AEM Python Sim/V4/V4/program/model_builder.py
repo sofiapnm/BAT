@@ -27,7 +27,10 @@ def build_model(
     model.Params.OutputFlag = GENERAL["gurobi_output_flag"]
 
     vars_dict = add_variables(model, n)
-    month_labels = pd.to_datetime(datetime_series).dt.to_period("M").astype(str).tolist()
+    # Convert to Series if not already (handles both Series and DatetimeIndex inputs)
+    dt_series = pd.Series(datetime_series) if not isinstance(datetime_series, pd.Series) else datetime_series
+    dt_series.index = range(len(dt_series))  # Reset index to ensure it's numeric
+    month_labels = pd.to_datetime(dt_series).dt.to_period("M").astype(str).tolist()
     unique_month_labels = list(dict.fromkeys(month_labels))
     vars_dict["monthly_peak_kw"] = model.addVars(
         unique_month_labels, lb=0.0, vtype=GRB.CONTINUOUS, name="monthly_peak_kw"

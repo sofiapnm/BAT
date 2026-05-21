@@ -3,7 +3,7 @@ from gurobipy import GRB
 from parameters.battery import BATTERY_MODE, BATTERY_TECHNICAL
 from parameters.general import GENERAL
 from parameters.heat_pump import HEAT_PUMP_TECHNICAL
-from parameters.ptes import PTES_TECHNICAL
+from parameters.ptes import PTES_MODE, PTES_TECHNICAL
 
 
 def add_variables(model, n):
@@ -107,6 +107,22 @@ def add_variables(model, n):
         lb=0.0, vtype=GRB.CONTINUOUS, name="woodchip_nominal_kwth"
     )
 
+    ptes_mode = PTES_MODE.lower()
+    if ptes_mode == "optional":
+        vars_dict["ptes_installed"] = model.addVar(
+            vtype=GRB.BINARY, name="ptes_installed"
+        )
+    elif ptes_mode == "always_on":
+        vars_dict["ptes_installed"] = model.addVar(
+            lb=1.0, ub=1.0, vtype=GRB.CONTINUOUS, name="ptes_installed"
+        )
+    elif ptes_mode == "always_off":
+        vars_dict["ptes_installed"] = model.addVar(
+            lb=0.0, ub=0.0, vtype=GRB.CONTINUOUS, name="ptes_installed"
+        )
+    else:
+        raise ValueError(f"Unknown PTES_MODE: {PTES_MODE}")
+
     # PTES (Pit Thermal Energy Storage) variables [kWh_th]
     vars_dict["ptes_charge_kWhth"] = model.addVars(
         n, lb=0.0, vtype=GRB.CONTINUOUS, name="ptes_charge_kWhth"
@@ -128,8 +144,19 @@ def add_variables(model, n):
     )
 
     # PTES storage volume sizing variable [m³]
+    ptes_volume_max = PTES_TECHNICAL["volume_m3_max"]
     vars_dict["ptes_volume_m3"] = model.addVar(
-        lb=0.0, vtype=GRB.CONTINUOUS, name="ptes_volume_m3"
+        lb=0.0, ub=ptes_volume_max, vtype=GRB.CONTINUOUS, name="ptes_volume_m3"
+    )
+
+    model.addConstr(
+        vars_dict["ptes_volume_m3"] <= vars_dict["ptes_installed"] * ptes_volume_max,
+        name="ptes_volume_upper_if_installed",
+    )
+    model.addConstr(
+        vars_dict["ptes_volume_m3"]
+        >= vars_dict["ptes_installed"] * PTES_TECHNICAL["volume_m3_min"],
+        name="ptes_volume_lower_if_installed",
     )
 
     return vars_dict

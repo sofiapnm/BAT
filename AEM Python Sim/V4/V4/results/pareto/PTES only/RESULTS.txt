@@ -1,0 +1,8 @@
+Annual totals
+Profit objective -> net annual profit [CHF]: 1,636,527.00
+Profit objective -> annual emissions burden [tCO2eq]: 2,189.47
+Profit objective -> cost considering emission penalty [CHF]: 1,636,527.00
+Emissions objective -> net annual profit [CHF]: 417,806.89
+Emissions objective -> annual emissions burden [tCO2eq]: 1,842.15
+Emissions objective -> profit considering emission penalty [CHF]: 417,806.89
+Done.
