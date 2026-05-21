@@ -276,7 +276,7 @@ def build_figure(dataframe, plot_objective_label):
     )
 
     fig.update_layout(
-        title=f"BESS+HP+PTES Energy Balance Analysis ({plot_objective_label})",
+        title=f"BESS+PTES+HP Energy Balance Analysis ({plot_objective_label})",
         template="plotly_white",
         hovermode="x unified",
         height=1300,

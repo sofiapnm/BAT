@@ -1,6 +1,6 @@
 #for capacity of 1-2MW, the following economic costs can be considered as correct
 #TECHNICAL AND EMISSION FACTORS HAVE TO BE REVISED
-BATTERY_MODE = "optional"
+BATTERY_MODE = "always_on"
 #options for battery mode: optional, always_on, always_off
 
 BATTERY_TECHNICAL = {
@@ -20,7 +20,7 @@ BATTERY_TECHNICAL = {
 BATTERY_ECONOMIC = {#
     "capex_rp_kwh": 60000,
     "battery_lifetime_years": 10,
-    "degradation_cost_rp_per_kwh_throughput": 0.0,
+    "degradation_cost_rp_per_kwh_throughput": 1e-4,
 }
 
 BATTERY_ECONOMIC["annual_opex_rp_per_kwh_year"] = (

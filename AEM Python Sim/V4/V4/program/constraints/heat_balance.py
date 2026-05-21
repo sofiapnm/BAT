@@ -149,6 +149,12 @@ def add_heat_balance_constraints(model, vars_dict, heatdemand_kwhth, n, datetime
         model.addConstr(
             ptes_soc[t] <= ptes_volume * kwhth_per_m3
         )
+        model.addConstr(
+            ptes_charge[t] <= ptes_volume * kwhth_per_m3
+        )
+        model.addConstr(
+            ptes_discharge[t] <= ptes_volume * kwhth_per_m3
+        )
 
         # PTES discharge power cap per timestep (optional)
         if ptes_discharge_power_kwth > 0:

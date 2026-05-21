@@ -5,9 +5,14 @@ PTES is an underground thermal energy storage system used to buffer heat supply
 and demand, enabling temporal flexibility in the thermal system.
 """
 
+PTES_MODE = "always_on"
+# options for PTES mode: optional, always_on, always_off
+
 # Technical parameters
 PTES_TECHNICAL = {
     "kwhth_per_m3": 137.84,  # Energy density: kWh_thermal per cubic meter of storage volume
+    "volume_m3_min": 10.22,
+    "volume_m3_max": 50000.0,
     "efficiency": 0.8,  # Round-trip efficiency (applied to charging process)
     "discharge_power_kwth":21464.328,  # Maximum discharge thermal power [kW_th]
     "lifetime_years": 30,  # Storage system lifetime for cost amortization

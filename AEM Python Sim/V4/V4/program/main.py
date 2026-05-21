@@ -124,7 +124,7 @@ def main():
         spot_price_profile=data["spot_price"],
         solution=selected_solution,
     )
-
+    
     results = build_results_table(
         datetime_series=data["datetime"],
         sol_cost=sol_cost,
