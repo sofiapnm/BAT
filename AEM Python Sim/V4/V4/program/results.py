@@ -639,10 +639,56 @@ def summarize_solution(
     }
 
 
-def save_results(results, output_path):
+def save_results(results, output_path, update_prefix=None):
+    """Save results to CSV.
+
+    If `update_prefix` is provided and the output file exists, only columns
+    starting with that prefix will be replaced/added in the existing file
+    (rows matched on `DateTime`). If the file does not exist, the full
+    `results` DataFrame is written.
+    """
     output_parent = Path(output_path).parent
     output_parent.mkdir(parents=True, exist_ok=True)
-    results.to_csv(output_path, index=False)
+
+    # If no selective update requested or file doesn't exist, write normally
+    out_path = Path(output_path)
+    if update_prefix is None or not out_path.exists():
+        results.to_csv(output_path, index=False)
+        return
+
+    # Merge: read existing file and replace only prefixed columns
+    existing = pd.read_csv(output_path, parse_dates=["DateTime"]) if out_path.exists() else pd.DataFrame()
+    if existing.empty:
+        results.to_csv(output_path, index=False)
+        return
+
+    new = results.copy()
+    # Ensure DateTime is present and parsed
+    if "DateTime" not in existing.columns or "DateTime" not in new.columns:
+        # Fallback: overwrite if DateTime missing
+        results.to_csv(output_path, index=False)
+        return
+
+    existing["DateTime"] = pd.to_datetime(existing["DateTime"])
+    new["DateTime"] = pd.to_datetime(new["DateTime"])
+
+    existing = existing.set_index("DateTime")
+    new = new.set_index("DateTime")
+
+    cols_to_update = [c for c in new.columns if c.startswith(update_prefix)]
+    if not cols_to_update:
+        # Nothing to update; leave file as-is
+        existing.reset_index().to_csv(output_path, index=False)
+        return
+
+    # Assign/update prefixed columns (alignment by DateTime index)
+    for col in cols_to_update:
+        existing[col] = new[col]
+
+    # Ensure DateTime is first column when writing
+    merged = existing.reset_index()
+    # Keep original column order as much as possible: DateTime then existing cols
+    merged.to_csv(output_path, index=False)
 
 
 def print_summary(results, output_path):

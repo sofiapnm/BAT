@@ -407,7 +407,11 @@ vars_dict["woodchip_boiler_heat_kWhth"] = model.addVars(
 
 **Constraints Applied To:**
 - Non-negativity: `lb=0.0`
-- No explicit power limit (unlimited thermal production from woodchip)
+ - Upper bound: thermal output limited by the `woodchip_nominal_kwth` sizing variable
+     (see [program/variables.py](program/variables.py#L100-L110)); the constraint
+     in [program/constraints/heat_balance.py](program/constraints/heat_balance.py#L102-L107)
+     enforces `woodchip_heat[t] ≤ woodchip_nominal_kwth * delta_t_h`. The nominal
+     variable has an upper bound of **5200.0 kW**.
 
 ---
 
@@ -446,7 +450,12 @@ ptes_cost_var = model.addVar(lb=0.0, vtype=GRB.CONTINUOUS, name="ptes_annual_cos
 | objective.py | add_ptes_cost_constraint() | 36 | Define via SOS2 interpolation |
 | objective.py | add_objective() | 187 | Add to total annual cost |
 
-**Computation Method:** SOS2 (Special Ordered Set type 2) with 9 breakpoints
+**Computation Method:** SOS2 (Special Ordered Set type 2) with dynamically
+generated breakpoints that extend up to the configured maximum storage volume
+`PTES_TECHNICAL['volume_m3_max']` (for example, the current configuration
+uses breakpoints like `[0.0, 0.1, 10, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, V_max]`).
+This ensures the piecewise-linear cost covers the full allowed range (e.g., up
+to 50,000 m³).
 
 ---
 

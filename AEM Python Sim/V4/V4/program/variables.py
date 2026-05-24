@@ -104,7 +104,7 @@ def add_variables(model, n):
 
     # Woodchip boiler nominal thermal power [kW_th]
     vars_dict["woodchip_nominal_kwth"] = model.addVar(
-        lb=0.0, vtype=GRB.CONTINUOUS, name="woodchip_nominal_kwth"
+        lb=0.0, ub=5200.0, vtype=GRB.CONTINUOUS, name="woodchip_nominal_kwth"
     )
 
     ptes_mode = PTES_MODE.lower()

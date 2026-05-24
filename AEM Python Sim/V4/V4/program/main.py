@@ -142,7 +142,13 @@ def main():
     else:
         kwh_out = "/workspaces/BAT/AEM Python Sim/V4/V4/results/emis_opt kWh results.csv"
     save_results(kwh_results, kwh_out)
-    save_results(results, GENERAL["output_path"])
+    # Selective update: only overwrite the objective-specific columns in the
+    # shared cost+emis results CSV. If the file doesn't exist, save_results
+    # will write the full DataFrame.
+    if objective_mode == "cost":
+        save_results(results, GENERAL["output_path"], update_prefix="cost_opt__")
+    else:
+        save_results(results, GENERAL["output_path"], update_prefix="emissions_opt__")
     print_summary(results, GENERAL["output_path"])
     print("Done.")
 

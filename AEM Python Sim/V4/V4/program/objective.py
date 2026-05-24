@@ -26,8 +26,15 @@ def add_ptes_cost_constraint(model, ptes_volume, ptes_cost_var):
     
     Uses SOS2 (Special Ordered Set type 2) for piecewise linear interpolation.
     """
-    # Volume breakpoints (m³)
-    v_breakpoints = [0.0, 0.1, 10, 50, 100, 200, 500, 1000, 2000, 5000]
+    # Volume breakpoints (m³).
+    # Start from a sensible base set and extend up to the configured maximum volume
+    base_breakpoints = [0.0, 0.1, 10, 50, 100, 200, 500, 1000, 2000, 5000]
+    ptes_max = PTES_TECHNICAL.get("volume_m3_max", 5000.0)
+    # Add common larger breakpoints and ensure the configured maximum is included
+    extra_breaks = [10000.0, 20000.0, ptes_max]
+    v_breakpoints = base_breakpoints + [b for b in extra_breaks if b > base_breakpoints[-1] and b <= ptes_max]
+    # Make unique and sorted to avoid duplicates
+    v_breakpoints = sorted(list(dict.fromkeys(v_breakpoints)))
     
     # Compute corresponding costs (rappen/year, annualized)
     def ptes_annual_cost_rp(v):
