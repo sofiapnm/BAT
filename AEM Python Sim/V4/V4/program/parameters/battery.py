@@ -34,7 +34,7 @@ BATTERY_ECONOMIC["annual_capex_rp_per_kwh_amortized"] = (
 
 #turn from kg to g...?
 BATTERY_EMISSIONS = {
-    # Arbitrary placeholder because your original model did not use battery-specific emissions directly
+    # original model did not use battery specific emissions directly
     "lifecycle_emissions_kgco2_per_kwh_throughput": 0.037,
     "battery_throughput_penalty_emissions": 1e-6,
 }
