@@ -179,6 +179,7 @@ def add_objective(
     model,
     vars_dict,
     production_kwh,
+    elecdemand_kwh,
     heatdemand_kwhth,
     spot_price_rp_per_kwh,
     objective_mode,
@@ -210,6 +211,8 @@ def add_objective(
     runofriver_emissions_per_kwh = RUNOFRIVER_EMISSIONS["emissions_kgco2eq_per_kwh_generated"]
     woodchip_cost_per_kwhth = WOODCHIP_BOILER_ECONOMIC["cost_rp_per_kwhth_useful"]
     thermal_revenue_per_kwhth = WOODCHIP_BOILER_ECONOMIC["revenue_rp_per_kwhth_sold"]
+    load_revenue_rp_per_kwh = RUNOFRIVER_ECONOMIC.get("load_revenue_rp_per_kwh", 0.0)
+    runofriver_cost_rp_per_kwh = RUNOFRIVER_ECONOMIC.get("cost_rp_per_kwh", 0.0)
     heatpump_lifetime_years = HEAT_PUMP_ECONOMIC["heatpump_lifetime_years"]
     heatpump_opex_percentage = HEAT_PUMP_ECONOMIC["annual_opex_percentage_of_capex"]
     heatpump_emissions_per_kwhth = HEAT_PUMP_EMISSIONS["emissions_kgco2eq_per_kwhth"]
@@ -243,10 +246,9 @@ def add_objective(
     # Amortize the CAPEX over the heat pump lifetime
     heatpump_annual_capex_amortized = heatpump_capex_var / heatpump_lifetime_years
 
-    prod_for_local = vars_dict["prod_for_local_demand"]
-    local_production_revenue = gp.quicksum(
-        prod_for_local[t] * runofriver_profit_per_kwh
-        for t in range(n)
+    # Revenue paid for meeting electrical demand (source-agnostic)
+    load_revenue = gp.quicksum(
+        elecdemand_kwh[t] * load_revenue_rp_per_kwh for t in range(n)
     )
     export_revenue = gp.quicksum(
         grid_export[t] * (spot_price_rp_per_kwh[t] - export_fixed_tariff)
@@ -256,7 +258,7 @@ def add_objective(
         heatdemand_kwhth[t] * thermal_revenue_per_kwhth for t in range(n)
     )
     annual_revenues = (
-        local_production_revenue
+        load_revenue
         + export_revenue
         + thermal_revenue
     )
@@ -303,18 +305,30 @@ def add_objective(
         + ptes_storage_cost
         + ptes_throughput_cost
     )
+    # Run-of-river marginal generation cost (applies per timestep production)
+    runofriver_cost = gp.quicksum(
+        production_kwh[t] * runofriver_cost_rp_per_kwh for t in range(n)
+    )
+    annual_costs = annual_costs + runofriver_cost
 
     annual_profit = annual_revenues - annual_costs
-
-    if objective_mode == "cost":
-        model.setObjective(annual_profit, GRB.MAXIMIZE)
-    elif objective_mode == "emissions":
-        expr = build_annual_emissions_expr(
+    annual_emissions = vars_dict.get("annual_emissions_expr")
+    if annual_emissions is None:
+        annual_emissions = build_annual_emissions_expr(
             vars_dict,
             production_kwh,
             n,
             datetime_series=datetime_series,
         )
-        model.setObjective(expr, GRB.MINIMIZE)
+
+    vars_dict["annual_revenues_expr"] = annual_revenues
+    vars_dict["annual_costs_expr"] = annual_costs
+    vars_dict["annual_profit_expr"] = annual_profit
+    vars_dict["annual_emissions_expr"] = annual_emissions
+
+    if objective_mode == "cost":
+        model.setObjective(annual_profit, GRB.MAXIMIZE)
+    elif objective_mode == "emissions":
+        model.setObjective(annual_emissions, GRB.MINIMIZE)
     else:
         raise ValueError(f"Unknown objective_mode: {objective_mode}")

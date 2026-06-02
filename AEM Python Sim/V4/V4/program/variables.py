@@ -72,14 +72,13 @@ def add_variables(model, n):
     )
 
     # Production allocated to meet local demand (remainder goes to export/battery)
-    vars_dict["prod_for_local_demand"] = model.addVars(
-        n, lb=0.0, vtype=GRB.CONTINUOUS, name="prod_for_local_demand"
-    )
+    # `prod_for_local_demand` removed — production is fixed and reported via input series
 
     # Thermal production from woodchip boiler [kWh_th]
     vars_dict["woodchip_boiler_heat_kWhth"] = model.addVars(
         n, lb=0.0, vtype=GRB.CONTINUOUS, name="woodchip_boiler_heat_kWhth"
     )
+
 
     # Heat pump thermal output [kWh_th]
     vars_dict["heatpump_heat_kWhth"] = model.addVars(

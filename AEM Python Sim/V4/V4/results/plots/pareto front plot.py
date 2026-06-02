@@ -5,9 +5,12 @@ from pathlib import Path
 import webbrowser
 
 
-CSV_PATH = "/workspaces/BAT/AEM Python Sim/V3/V3/results/Pareto Front Results.csv"
-HTML_OUTPUT_PATH = "/workspaces/BAT/AEM Python Sim/V3/V3/results/plots/Pareto front plot.html"
-PARETO_CURRENT_STATE_CSV_PATH = "/workspaces/BAT/AEM Python Sim/V3/V3/results/pareto_currentstate_annual_summary.csv"
+PLOTS_DIR = Path(__file__).resolve().parent
+RESULTS_DIR = PLOTS_DIR.parent
+
+CSV_PATH = RESULTS_DIR / "Pareto Front Results.csv"
+HTML_OUTPUT_PATH = PLOTS_DIR / "Pareto front plot.html"
+PARETO_CURRENT_STATE_CSV_PATH = RESULTS_DIR / "pareto_currentstate_annual_summary.csv"
 RP_PER_CHF = 100.0
 
 

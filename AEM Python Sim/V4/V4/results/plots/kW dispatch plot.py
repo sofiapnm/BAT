@@ -68,7 +68,7 @@ def build_figure(dataframe, plot_objective_label):
     fig = make_subplots(
         rows=3,
         cols=1,
-        specs=[[{"secondary_y": True}], [{"secondary_y": True}], [{"secondary_y": False}]],
+        specs=[[{"secondary_y": True}], [{"secondary_y": True}], [{"secondary_y": True}]],
         subplot_titles=(
             "Electricity Dispatch Optimization",
             "Thermal Dispatch Optimization",
@@ -150,18 +150,39 @@ def build_figure(dataframe, plot_objective_label):
             secondary_y=False,
         )
 
+    # Add spot price to the electricity subplot (row 1) on a secondary axis
     fig.add_trace(
         go.Scatter(
             x=dataframe["DateTime"],
             y=dataframe["spot price [Rp/kWh]"],
             mode="lines",
             name="spot price [Rp/kWh]",
-            line={"width": 1, "color": colors["spot price [Rp/kWh]"]},
+            line={"width": 1, "color": colors["spot price [Rp/kWh]"], "dash": "dot"},
         ),
-        row=3,
+        row=1,
         col=1,
-        secondary_y=False,
+        secondary_y=True,
     )
+
+    # Move the spot-price trace to a tertiary y-axis overlaying the electricity subplot
+    spot_indices = [i for i, t in enumerate(fig.data) if getattr(t, "name", None) == "spot price [Rp/kWh]"]
+    if spot_indices:
+        idx = spot_indices[-1]
+        fig.data[idx].update(yaxis="y7")
+
+        fig.update_layout(
+            yaxis7=dict(
+                title="Rp/kWh (spot price)",
+                range=[-20, 40],
+                overlaying="y",
+                side="right",
+                position=0.95,
+                anchor="x1",
+                showgrid=False,
+            )
+        )
+
+    # (Battery and PTES SoC are plotted in their original subplots below)
 
     fig.add_trace(
         go.Scatter(
@@ -184,7 +205,6 @@ def build_figure(dataframe, plot_objective_label):
         row=1,
         col=1,
     )
-
     # Thermal plot (Row 2)
     if "heatpump_heat_kWhth" in dataframe.columns:
         dataframe = dataframe.copy()
@@ -232,7 +252,7 @@ def build_figure(dataframe, plot_objective_label):
             y=dataframe["ptes_soc_kWhth"],
             mode="lines",
             name="ptes_soc_kWhth",
-            line={"width": 2, "color": "#bcbd22", "dash": "dash"},
+            line={"width": 2, "color": "#2225bd", "dash": "dash"},
             showlegend=True,
         ),
         row=2,
@@ -257,6 +277,7 @@ def build_figure(dataframe, plot_objective_label):
         secondary_y=False,
         row=1,
     )
+    # Secondary axis on electricity subplot used for battery SoC
     fig.update_yaxes(title_text="kWh (Battery SoC)", secondary_y=True, row=1)
     fig.update_yaxes(
         title_text="kW",
@@ -266,17 +287,10 @@ def build_figure(dataframe, plot_objective_label):
         row=2,
     )
     fig.update_yaxes(title_text="kWh (PTES SoC)", secondary_y=True, row=2)
-    fig.update_yaxes(
-        title_text="Rp/kWh",
-        range=[-20, 40],
-        zeroline=True,
-        zerolinewidth=1,
-        secondary_y=False,
-        row=3,
-    )
+    # (Spot Price subplot left intentionally without price traces; axes controlled in other subplots)
 
     fig.update_layout(
-        title=f"PTES+HP Energy Balance Analysis ({plot_objective_label})",
+        title=f"BESS+PTES+HP Energy Balance Analysis ({plot_objective_label})",
         template="plotly_white",
         hovermode="x unified",
         height=1300,

@@ -1,3 +1,4 @@
+import argparse
 from pathlib import Path
 
 import pandas as pd
@@ -13,6 +14,27 @@ from results import (
 )
 
 
+RESULTS_DIR = Path(__file__).resolve().parents[1] / "results"
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Run Pareto points one at a time or as a full sequence."
+    )
+    parser.add_argument(
+        "--point",
+        type=int,
+        default=None,
+        help="Run only one epsilon point by 1-based index.",
+    )
+    parser.add_argument(
+        "--pause-between-points",
+        action="store_true",
+        help="Pause for Enter between Pareto points.",
+    )
+    return parser.parse_args()
+
+
 def build_pareto_caps(min_emissions_kgco2, max_emissions_kgco2, num_points):
     if num_points <= 2 or max_emissions_kgco2 <= min_emissions_kgco2:
         return []
@@ -23,9 +45,8 @@ def build_pareto_caps(min_emissions_kgco2, max_emissions_kgco2, num_points):
 
 def load_anchor_summaries():
     # Load the two kWh results CSVs directly (cost_opt and emis_opt) — no longer use obsolete Cost+Emi Results.csv
-    results_dir = Path("/workspaces/BAT/AEM Python Sim/V4/V4/results")
-    cost_kwh_path = results_dir / "cost_opt kWh results.csv"
-    emis_kwh_path = results_dir / "emis_opt kWh results.csv"
+    cost_kwh_path = RESULTS_DIR / "cost_opt kWh results.csv"
+    emis_kwh_path = RESULTS_DIR / "emis_opt kWh results.csv"
     
     if not cost_kwh_path.exists() or not emis_kwh_path.exists():
         missing = []
@@ -76,7 +97,21 @@ def load_anchor_summaries():
     return cost_kwh_results, emis_kwh_results, cost_summary, emissions_summary
 
 
+def upsert_pareto_row(output_path, new_row):
+    output_path = Path(output_path)
+    if output_path.exists():
+        existing = pd.read_csv(output_path)
+        combined = pd.concat([existing, pd.DataFrame([new_row])], ignore_index=True)
+        combined = combined.drop_duplicates(subset=["pareto_point"], keep="last")
+    else:
+        combined = pd.DataFrame([new_row])
+
+    combined = combined.sort_values(by="annual_emissions_burden_kgco2")
+    save_results(combined, output_path)
+
+
 def main():
+    args = parse_args()
     cost_kwh_results, emis_kwh_results, cost_summary, emissions_summary = load_anchor_summaries()
 
     pareto_rows = [
@@ -107,7 +142,22 @@ def main():
     spot_price = cost_kwh_results["spot price [Rp/kWh]"]
     datetime_series = cost_kwh_results["DateTime"]
 
+    total_epsilon_points = len(emissions_caps)
+    if args.point is not None:
+        if args.point < 1 or args.point > total_epsilon_points:
+            raise ValueError(
+                f"--point must be between 1 and {total_epsilon_points}. Got {args.point}."
+            )
+        emissions_caps = [emissions_caps[args.point - 1]]
+
     for i, emissions_cap in enumerate(emissions_caps):
+        point_number = args.point if args.point is not None else i + 1
+        if args.pause_between_points:
+            try:
+                input(f"Press Enter to run Pareto point {point_number}/{total_epsilon_points}...")
+            except EOFError:
+                pass
+
         model_pareto, vars_pareto = build_model(
             production_kwh=production,
             elecdemand_kwh=elecdemand,
@@ -119,7 +169,7 @@ def main():
             final_soc_kwh=full_horizon_end_soc,
             emissions_cap_kgco2=emissions_cap,
         )
-        solve_model(model_pareto, objective_mode=f"pareto_cost_cap_{i}")
+        solve_model(model_pareto, objective_mode=f"pareto_cost_cap_{point_number}")
         sol_pareto = extract_solution(vars_pareto, len(elecdemand))
         monthly_peak_pareto = extract_monthly_peak_solution(vars_pareto)
         pareto_summary = summarize_solution(
@@ -132,19 +182,20 @@ def main():
         )
         pareto_rows.append(
             {
-                "pareto_point": i + 1,
+                "pareto_point": point_number,
                 "scenario": "epsilon_constrained_cost",
                 "emissions_cap_kgco2": emissions_cap,
                 **pareto_summary,
             }
         )
-        save_results(
-            pd.DataFrame(pareto_rows).sort_values(by="annual_emissions_burden_kgco2"),
-            GENERAL["pareto_output_path"],
-        )
+        upsert_pareto_row(GENERAL["pareto_output_path"], pareto_rows[-1])
         print(
-            f"Pareto progress: {i + 1}/{len(emissions_caps)} points saved to {GENERAL['pareto_output_path']}"
+            f"Pareto progress: {point_number}/{total_epsilon_points} points saved to {GENERAL['pareto_output_path']}"
         )
+
+        if args.point is not None:
+            print("Checkpoint mode complete after one Pareto point.")
+            return
 
     pareto_rows.append(
         {

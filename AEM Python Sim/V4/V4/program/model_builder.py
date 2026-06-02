@@ -55,16 +55,7 @@ def build_model(
     )
 
     # Constrain production allocation: can only allocate to local demand what exists and what demand needs
-    prod_for_local = vars_dict["prod_for_local_demand"]
-    for t in range(n):
-        model.addConstr(
-            prod_for_local[t] <= production_kwh[t],
-            name=f"prod_local_max_prod[{t}]",
-        )
-        model.addConstr(
-            prod_for_local[t] <= elecdemand_kwh[t],
-            name=f"prod_local_max_demand[{t}]",
-        )
+    # Production allocation variable removed — production and demand are exogenous
 
     add_battery_constraints(
         model=model,
@@ -92,6 +83,7 @@ def build_model(
         model=model,
         vars_dict=vars_dict,
         production_kwh=production_kwh,
+        elecdemand_kwh=elecdemand_kwh,
         heatdemand_kwhth=heatdemand_kwhth,
         spot_price_rp_per_kwh=spot_price_rp_per_kwh,
         objective_mode=objective_mode,
