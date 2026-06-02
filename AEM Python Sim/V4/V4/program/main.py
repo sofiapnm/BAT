@@ -2,6 +2,7 @@ from data_loader import load_input_data
 import pandas as pd
 import numpy as np
 import sys
+from pathlib import Path
 from model_builder import build_model, solve_model
 from parameters.battery import BATTERY_TECHNICAL
 from parameters.general import GENERAL
@@ -15,7 +16,7 @@ from results import (
 )
 
 
-# Set optimization horizon end month directly here (1-12), or None for full year.
+# set optimization horizon end month directly here (1-12), or None for full year.
 OPTIMIZATION_END_MONTH = None
 
 
@@ -47,7 +48,7 @@ def main():
 
     print(f"Starting optimization run in '{objective_mode}' mode...")
 
-    # Optional: limit optimization horizon Jan..END_MONTH (set directly in this file)
+    # NOTE OPTIONAL: limit optimization horizon Jan..END_MONTH (set directly in this file)
     end_month = OPTIMIZATION_END_MONTH
     if end_month is not None:
         # Integer-only configuration by design.
@@ -123,7 +124,7 @@ def main():
         spot_price_profile=data["spot_price"],
         solution=selected_solution,
     )
-
+    
     results = build_results_table(
         datetime_series=data["datetime"],
         sol_cost=sol_cost,
@@ -135,8 +136,16 @@ def main():
         monthly_peak_emis=monthly_peak_emis,
     )
 
-    save_results(kwh_results, GENERAL["kwh_output_path"])
-    save_results(results, GENERAL["output_path"])
+
+    if objective_mode == "cost":
+        kwh_out = "/workspaces/BAT/AEM Python Sim/V4/V4/results/cost_opt kWh results.csv"
+    else:
+        kwh_out = "/workspaces/BAT/AEM Python Sim/V4/V4/results/emis_opt kWh results.csv"
+    save_results(kwh_results, kwh_out)
+    if objective_mode == "cost":
+        save_results(results, GENERAL["output_path"], update_prefix="cost_opt__")
+    else:
+        save_results(results, GENERAL["output_path"], update_prefix="emissions_opt__")
     print_summary(results, GENERAL["output_path"])
     print("Done.")
 

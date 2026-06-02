@@ -1,13 +1,50 @@
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import sys
 
-CSV_PATH = "/workspaces/BAT/AEM Python Sim/V4/V4/results/kWh Results.csv"
+
+def _resolve_energy_balance_mode():
+    """Prompt user to choose between profit or emission energy balance."""
+    mode_raw = sys.argv[1] if len(sys.argv) > 1 else None
+    
+    if mode_raw is None:
+        mode_raw = input("Choose energy balance ('profit' or 'emission'): ")
+    
+    mode = str(mode_raw).strip().lower()
+    mapping = {
+        "profit": "cost",
+        "cost": "cost",
+        "emission": "emissions",
+        "emissions": "emissions",
+    }
+    resolved = mapping.get(mode)
+    if resolved is None:
+        raise ValueError(
+            f"Invalid energy balance mode '{mode_raw}'. Use 'profit' or 'emission'."
+        )
+    return resolved
+
+
+def get_csv_path_and_label(objective_mode):
+    """Return CSV path and label based on objective mode."""
+    results_dir = "/workspaces/BAT/AEM Python Sim/V4/V4/results"
+    if objective_mode == "cost":
+        return (
+            f"{results_dir}/cost_opt kWh results.csv",
+            "cost-optimized solution",
+        )
+    else:
+        return (
+            f"{results_dir}/emis_opt kWh results.csv",
+            "emissions-optimized solution",
+        )
+
+
 HTML_OUTPUT_PATH = "/workspaces/BAT/AEM Python Sim/V4/V4/results/plots/kWh energy balance plot.html"
-PLOT_OBJECTIVE_LABEL = "cost-optimized solution"
 
 
-def build_figure(dataframe):
+def build_figure(dataframe, plot_objective_label):
     fig = make_subplots(
         rows=3,
         cols=1,
@@ -117,7 +154,7 @@ def build_figure(dataframe):
         ),
         row=1,
         col=1,
-        secondary_y=False,
+        secondary_y=True,
     )
 
     fig.add_hline(
@@ -180,7 +217,7 @@ def build_figure(dataframe):
         ),
         row=2,
         col=1,
-        secondary_y=False,
+        secondary_y=True,
     )
 
     fig.add_hline(
@@ -219,7 +256,7 @@ def build_figure(dataframe):
     )
 
     fig.update_layout(
-        title=f"BESS+HP+PTES Energy Balance Analysis ({PLOT_OBJECTIVE_LABEL})",
+        title=f"BESS+PTES+HP Energy Balance Analysis ({plot_objective_label})",
         template="plotly_white",
         hovermode="x unified",
         height=1300,
@@ -230,7 +267,10 @@ def build_figure(dataframe):
 
 
 def main():
-    df = pd.read_csv(CSV_PATH)
+    objective_mode = _resolve_energy_balance_mode()
+    csv_path, plot_label = get_csv_path_and_label(objective_mode)
+    
+    df = pd.read_csv(csv_path)
     df["DateTime"] = pd.to_datetime(df["DateTime"])
 
     # Create electricity energy columns
@@ -247,9 +287,9 @@ def main():
     df["ptes_discharge_negative_kWhth"] = -df["ptes_discharge_kWhth"]
     df["ptes_charge_positive_kWhth"] = df["ptes_charge_kWhth"]
 
-    fig = build_figure(df)
+    fig = build_figure(df, plot_label)
     fig.add_annotation(
-        text="Source: kWh Results.csv built from the cost objective solution",
+        text=f"Source: {objective_mode.capitalize()}-optimized kWh Results.csv",
         xref="paper",
         yref="paper",
         x=0,

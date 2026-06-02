@@ -1,7 +1,9 @@
 RUNOFRIVER_ECONOMIC = {
-    # Revenue when run-of-river generation is used locally for electrical demand.
-    # Export revenue is modeled separately as spot price minus the fixed tariff.
-    "profit_rp_per_kwh": 8.00#(12.50 - 6.00), #+ 11.00, #11rp/kwh uncertain (grid usage)
+    "profit_rp_per_kwh": 0.0,
+    # marginal cost incurred by run-of-river generation (Rp/kWh)
+    "cost_rp_per_kwh": 6.0,
+    # load revenue paid for meeting electrical demand (source-agnostic), Rp/kWh
+    "load_revenue_rp_per_kwh": 12.5,
     # "profit_rp_per_month": 450.0 + 967.0, #967 rp/month uncertain (grid usage)
 }
 

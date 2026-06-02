@@ -25,12 +25,11 @@ def build_model(
 
     model = gp.Model(GENERAL["solver_name"])
     model.Params.OutputFlag = GENERAL["gurobi_output_flag"]
-    time_limit_s = GENERAL.get("solver_time_limit_s", None)
-    if time_limit_s is not None:
-        model.Params.TimeLimit = float(time_limit_s)
 
     vars_dict = add_variables(model, n)
-    month_labels = pd.to_datetime(datetime_series).dt.to_period("M").astype(str).tolist()
+    dt_series = pd.Series(datetime_series) if not isinstance(datetime_series, pd.Series) else datetime_series
+    dt_series.index = range(len(dt_series))  # Reset index to ensure it's numeric
+    month_labels = pd.to_datetime(dt_series).dt.to_period("M").astype(str).tolist()
     unique_month_labels = list(dict.fromkeys(month_labels))
     vars_dict["monthly_peak_kw"] = model.addVars(
         unique_month_labels, lb=0.0, vtype=GRB.CONTINUOUS, name="monthly_peak_kw"
@@ -54,18 +53,6 @@ def build_model(
         datetime_series=datetime_series,
     )
 
-    # Constrain production allocation: can only allocate to local demand what exists and what demand needs
-    prod_for_local = vars_dict["prod_for_local_demand"]
-    for t in range(n):
-        model.addConstr(
-            prod_for_local[t] <= production_kwh[t],
-            name=f"prod_local_max_prod[{t}]",
-        )
-        model.addConstr(
-            prod_for_local[t] <= elecdemand_kwh[t],
-            name=f"prod_local_max_demand[{t}]",
-        )
-
     add_battery_constraints(
         model=model,
         vars_dict=vars_dict,
@@ -78,6 +65,7 @@ def build_model(
         vars_dict=vars_dict,
         production_kwh=production_kwh,
         n=n,
+        datetime_series=datetime_series,
     )
     vars_dict["annual_emissions_expr"] = annual_emissions_expr
 
@@ -91,10 +79,12 @@ def build_model(
         model=model,
         vars_dict=vars_dict,
         production_kwh=production_kwh,
+        elecdemand_kwh=elecdemand_kwh,
         heatdemand_kwhth=heatdemand_kwhth,
         spot_price_rp_per_kwh=spot_price_rp_per_kwh,
         objective_mode=objective_mode,
         n=n,
+        datetime_series=datetime_series,
     )
 
     delta_t_h = GENERAL["delta_t_h"]
@@ -116,17 +106,6 @@ def solve_model(model, objective_mode="unknown"):
     model.optimize()
 
     if model.Status == GRB.OPTIMAL:
-        return model
-
-    if (
-        model.Status == GRB.TIME_LIMIT
-        and model.SolCount > 0
-        and GENERAL.get("accept_time_limit_solution", True)
-    ):
-        print(
-            f"Warning: {objective_mode} hit time limit; using best incumbent "
-            f"(MIPGap={model.MIPGap:.4f}, ObjVal={model.ObjVal:.6g})."
-        )
         return model
 
     if model.Status != GRB.OPTIMAL:

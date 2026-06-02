@@ -11,36 +11,43 @@ def add_battery_constraints(model, vars_dict, n, init_soc_kwh, final_soc_kwh):
     delta_t_h = GENERAL["delta_t_h"]
     charge_eff = BATTERY_TECHNICAL["charge_eff"]
 
-    max_charge_kwh = BATTERY_TECHNICAL["max_charge_power_kw"] * delta_t_h
-    max_discharge_kwh = BATTERY_TECHNICAL["max_discharge_power_kw"] * delta_t_h
-    soc_min_kwh = vars_dict["soc_min_kwh"]
-    soc_max_kwh = vars_dict["soc_max_kwh"]
+    # Use variable capacity to derive power and SOC bounds.
+    capacity = vars_dict["battery_capacity_kwh"]
+    # Power is half the energy capacity (kW). Convert to kWh per timestep by multiplying delta_t_h.
+    charge_coeff = 0.5 * delta_t_h
+    discharge_coeff = 0.5 * delta_t_h
+    soc_min_frac = BATTERY_TECHNICAL["soc_min_frac"]
+    soc_max_frac = BATTERY_TECHNICAL["soc_max_frac"]
 
     for t in range(n):
+
+        # Charge/discharge limits scale with capacity variable (linear constraints)
         model.addConstr(
-            batt_charge[t] <= max_charge_kwh * battery_installed,
+            batt_charge[t] <= charge_coeff * capacity,
             name=f"charge_rate_limit[{t}]",
         )
 
         model.addConstr(
-            batt_discharge[t] <= max_discharge_kwh * battery_installed,
+            batt_discharge[t] <= discharge_coeff * capacity,
             name=f"discharge_rate_limit[{t}]",
         )
 
+        # SOC bounds as fractions of capacity
         model.addConstr(
-            soc[t] >= soc_min_kwh * battery_installed,
+            soc[t] >= soc_min_frac * capacity,
             name=f"soc_min[{t}]",
         )
 
         model.addConstr(
-            soc[t] <= soc_max_kwh * battery_installed,
+            soc[t] <= soc_max_frac * capacity,
             name=f"soc_max[{t}]",
         )
 
         if t == 0:
+            # Initial SOC expressed as fraction of the chosen capacity
             model.addConstr(
                 soc[t]
-                == init_soc_kwh * battery_installed
+                == BATTERY_TECHNICAL["soc_init_frac"] * capacity
                 + charge_eff * batt_charge[t]
                 - batt_discharge[t],
                 name=f"soc_transition[{t}]",
@@ -52,8 +59,9 @@ def add_battery_constraints(model, vars_dict, n, init_soc_kwh, final_soc_kwh):
                 name=f"soc_transition[{t}]",
             )
 
-    if final_soc_kwh is not None:
+    # Enforce end SOC as fraction of capacity if requested
+    if BATTERY_TECHNICAL.get("soc_end_frac", None) is not None:
         model.addConstr(
-            soc[n - 1] == final_soc_kwh * battery_installed,
+            soc[n - 1] == BATTERY_TECHNICAL["soc_end_frac"] * capacity,
             name="final_soc",
         )

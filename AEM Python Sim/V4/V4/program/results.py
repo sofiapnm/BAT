@@ -2,6 +2,7 @@ import pandas as pd
 from pathlib import Path
 
 from parameters.battery import BATTERY_ECONOMIC, BATTERY_TECHNICAL
+from parameters.battery import BATTERY_EMISSIONS
 from parameters.general import GENERAL
 from parameters.grid_import import (
     IMPORT_EMISSIONS,
@@ -17,6 +18,7 @@ from parameters.heat_pump import (
     HEAT_PUMP_TECHNICAL,
     HEAT_PUMP_ECONOMIC,
     HEAT_PUMP_EMISSIONS,
+    heatpump_cop_profile,
     heatpump_total_cost_rp,
 )
 from parameters.runofriver import RUNOFRIVER_ECONOMIC, RUNOFRIVER_EMISSIONS
@@ -24,8 +26,21 @@ from parameters.woodchip_boiler import WOODCHIP_BOILER_ECONOMIC, WOODCHIP_BOILER
 from parameters.ptes import PTES_TECHNICAL, PTES_ECONOMIC, PTES_EMISSIONS
 
 
+def clean_zero(value, tol=1e-6):
+    return 0.0 if abs(value) < tol else float(value)
+
+
+def clean_binary(value, tol=1e-6):
+    cleaned = clean_zero(value, tol=tol)
+    return float(round(cleaned))
+
+
 def extract_solution(vars_dict, n):
-    battery_installed = float(vars_dict["battery_installed"].X)
+    battery_installed = clean_binary(vars_dict["battery_installed"].X)
+    ptes_installed = clean_binary(vars_dict["ptes_installed"].X)
+    battery_capacity = clean_zero(
+        vars_dict["battery_capacity_kwh"].X
+    ) if "battery_capacity_kwh" in vars_dict else BATTERY_TECHNICAL["capacity_kwh"]
     heatpump_nominal = float(
         vars_dict.get("heatpump_nominal_kwth", vars_dict.get("heatpump_nominal_kWhth")).X
     )
@@ -38,12 +53,14 @@ def extract_solution(vars_dict, n):
     return pd.DataFrame(
         {
             "battery_installed": [battery_installed for _ in range(n)],
+            "ptes_installed": [ptes_installed for _ in range(n)],
+            "battery_capacity_kwh": [battery_capacity for _ in range(n)],
             "grid_import_kWh": [vars_dict["grid_import"][t].X for t in range(n)],
             "grid_export_kWh": [vars_dict["grid_export"][t].X for t in range(n)],
             "battery_charge_kWh": [vars_dict["batt_charge"][t].X for t in range(n)],
             "battery_discharge_kWh": [vars_dict["batt_discharge"][t].X for t in range(n)],
             "battery_soc_kWh": [vars_dict["soc"][t].X for t in range(n)],
-            "prod_for_local_demand_kWh": [vars_dict["prod_for_local_demand"][t].X for t in range(n)],
+            # `prod_for_local_demand` removed: production is reported directly
             "woodchip_boiler_heat_kWhth": [vars_dict["woodchip_boiler_heat_kWhth"][t].X for t in range(n)],
             "heatpump_heat_kWhth": [vars_dict["heatpump_heat_kWhth"][t].X for t in range(n)],
             "heatpump_elec_kWh": [vars_dict["heatpump_elec_kWh"][t].X for t in range(n)],
@@ -88,7 +105,6 @@ def build_kwh_results_table(
         spot_price_profile, index=results.index, dtype=float
     )
 
-    # Add monthly COP profile
     datetime_s = pd.to_datetime(datetime_series)
     months = datetime_s.dt.month.values
     cop_monthly = HEAT_PUMP_TECHNICAL["cop_monthly"]
@@ -107,6 +123,80 @@ def build_kwh_results_table(
     results["ptes_discharge_supply_share"] = (
         results["ptes_discharge_kWhth"].div(heatdemand_nonzero).fillna(0.0)
     )
+
+    # self-sufficiency metric: fraction of load met without grid imports
+    # per]-step: 1 - grid_import / load (if load == 0 => set to 1.0)
+    load_series = results["load_kWh"]
+    grid_import_series = results.get("grid_import_kWh", pd.Series(0.0, index=results.index, dtype=float))
+    # Avoid division by zero: where load==0, define self-sufficiency as 1.0
+    self_suff = 1.0 - grid_import_series.div(load_series.replace(0.0, pd.NA))
+    self_suff = self_suff.fillna(1.0).clip(lower=0.0, upper=1.0)
+    results["self_sufficiency"] = self_suff
+
+
+    from parameters.battery import BATTERY_TECHNICAL
+    charge_eff = BATTERY_TECHNICAL.get("charge_eff", 1.0)
+    discharge_eff = BATTERY_TECHNICAL.get("discharge_eff", 1.0)
+    prod = results["production_kWh"].fillna(0.0)
+    load = results["load_kWh"].fillna(0.0)
+    batt_charge = results.get("battery_charge_kWh", pd.Series(0.0, index=results.index)).fillna(0.0)
+    batt_discharge = results.get("battery_discharge_kWh", pd.Series(0.0, index=results.index)).fillna(0.0)
+    grid_import = results.get("grid_import_kWh", pd.Series(0.0, index=results.index)).fillna(0.0)
+    n_steps = len(results)
+    soc_from_prod = [0.0] * n_steps
+    soc_from_grid = [0.0] * n_steps
+    direct_prod_to_load = [0.0] * n_steps
+    prod_to_batt_charge = [0.0] * n_steps
+    prod_via_batt_to_load = [0.0] * n_steps
+    prev_soc_prod = 0.0
+    prev_soc_grid = results["battery_soc_kWh"].iloc[0] if "battery_soc_kWh" in results and len(results) > 0 else 0.0
+
+    for t in range(n_steps):
+        p = float(prod.iloc[t])
+        L = float(load.iloc[t])
+        bc = float(batt_charge.iloc[t])
+        bd = float(batt_discharge.iloc[t])
+        gi = float(grid_import.iloc[t])
+        direct = min(p, L)
+        direct_prod_to_load[t] = direct
+        remaining_prod = max(0.0, p - direct)
+        prod_charge = min(remaining_prod, bc)
+        prod_to_batt_charge[t] = prod_charge
+        grid_to_batt_charge = max(0.0, bc - prod_charge)
+        soc_prod_after_charge = prev_soc_prod + charge_eff * prod_charge
+        soc_grid_after_charge = prev_soc_grid + charge_eff * grid_to_batt_charge
+
+        soc_total_after_charge = soc_prod_after_charge + soc_grid_after_charge
+        if soc_total_after_charge > 0 and bd > 0:
+            frac_prod = soc_prod_after_charge / soc_total_after_charge
+            draw_prod = frac_prod * bd
+            draw_grid = bd - draw_prod
+        else:
+            draw_prod = 0.0
+            draw_grid = 0.0
+        prod_via_batt_to_load[t] = discharge_eff * draw_prod
+        next_soc_prod = max(0.0, soc_prod_after_charge - draw_prod)
+        next_soc_grid = max(0.0, soc_grid_after_charge - draw_grid)
+
+        soc_from_prod[t] = soc_prod_after_charge if t == 0 else next_soc_prod
+        soc_from_grid[t] = soc_grid_after_charge if t == 0 else next_soc_grid
+
+        prev_soc_prod = next_soc_prod
+        prev_soc_grid = next_soc_grid
+
+    results["direct_prod_to_load_kWh"] = pd.Series(direct_prod_to_load, index=results.index, dtype=float)
+    results["prod_to_batt_charge_kWh"] = pd.Series(prod_to_batt_charge, index=results.index, dtype=float)
+    results["prod_via_batt_to_load_kWh"] = pd.Series(prod_via_batt_to_load, index=results.index, dtype=float)
+    results["own_production_supply_kWh"] = results["direct_prod_to_load_kWh"] + results["prod_via_batt_to_load_kWh"]
+    own_supply = results["own_production_supply_kWh"]
+    per_step_ss = own_supply.div(results["load_kWh"].replace(0.0, pd.NA)).fillna(1.0).clip(lower=0.0, upper=1.0)
+    results["self_sufficiency_production_traced"] = per_step_ss
+    annual_own_supply = float(results["own_production_supply_kWh"].sum())
+    annual_load = float(results["load_kWh"].sum())
+    annual_prod_traced_ss = 1.0 if annual_load == 0 else max(0.0, min(1.0, annual_own_supply / annual_load))
+    if len(results) > 0:
+        results.loc[results.index[0], "cost_opt__annual_prod_traced_self_sufficiency_fraction"] = annual_prod_traced_ss
+        results.loc[results.index[0], "cost_opt__annual_own_production_supply_kwh"] = annual_own_supply
 
     return results
 
@@ -132,25 +222,39 @@ def build_results_table(
     for col in sol_emis.columns:
         results[f"emissions_opt__{col}"] = sol_emis[col].values
 
-    battery_capacity_kwh = BATTERY_TECHNICAL["capacity_kwh"]
-    battery_capex = BATTERY_ECONOMIC["annual_capex_rp_per_kwh_amortized"] * battery_capacity_kwh
-    battery_annual_opex = (
-        BATTERY_ECONOMIC["annual_opex_rp_per_kwh_year"] * battery_capacity_kwh
-    )
+    battery_capacity_kwh_cost = float(sol_cost["battery_capacity_kwh"].iloc[0]) if "battery_capacity_kwh" in sol_cost else BATTERY_TECHNICAL["capacity_kwh"]
+    battery_capacity_kwh_emis = float(sol_emis["battery_capacity_kwh"].iloc[0]) if "battery_capacity_kwh" in sol_emis else BATTERY_TECHNICAL["capacity_kwh"]
+    battery_capex = BATTERY_ECONOMIC["annual_capex_rp_per_kwh_amortized"]
+    battery_annual_opex = BATTERY_ECONOMIC["annual_opex_rp_per_kwh_year"]
     battery_degradation_cost = BATTERY_ECONOMIC["degradation_cost_rp_per_kwh_throughput"]
     grid_emissions = IMPORT_EMISSIONS["grid_emissions_kgco2_per_kwh"]
     export_emissions = EXPORT_EMISSIONS["export_emissions_kgco2_per_kwh"]
-    runofriver_profit_per_kwh = RUNOFRIVER_ECONOMIC["profit_rp_per_kwh"]
+    runofriver_cost_per_kwh = RUNOFRIVER_ECONOMIC.get("cost_rp_per_kwh", 0.0)
     runofriver_emissions_per_kwh = RUNOFRIVER_EMISSIONS["emissions_kgco2eq_per_kwh_generated"]
     woodchip_cost_per_kwhth = WOODCHIP_BOILER_ECONOMIC["cost_rp_per_kwhth_useful"]
     thermal_revenue_per_kwhth = WOODCHIP_BOILER_ECONOMIC["revenue_rp_per_kwhth_sold"]
     woodchip_emissions_per_kwhth = WOODCHIP_BOILER_EMISSIONS["emissions_kgco2eq_per_kwhth"]
     ptes_emissions_per_m3 = PTES_EMISSIONS["emissions_kgco2eq_per_m3"]
+    battery_emissions_per_kwh = BATTERY_EMISSIONS["lifecycle_emissions_kgco2_per_kwh_throughput"]
+    battery_throughput_emissions_per_kwh = (
+        battery_emissions_per_kwh
+        + BATTERY_EMISSIONS.get("battery_throughput_penalty_emissions", 0.0)
+    )
+    heatpump_electricity_emissions_factor = HEAT_PUMP_EMISSIONS.get(
+        "electricity_source_emissions_kgco2_per_kwh"
+    )
+    if heatpump_electricity_emissions_factor is None:
+        heatpump_electricity_emissions_factor = grid_emissions
+
+    def heatpump_source_emissions_series(prefix):
+        return pd.Series(
+            heatpump_electricity_emissions_factor,
+            index=results.index,
+            dtype=float,
+        )
 
     spot_price_series = pd.Series(spot_price, index=results.index, dtype=float)
     production_series = pd.Series(production, index=results.index, dtype=float)
-    battery_installed_cost = float(sol_cost["battery_installed"].iloc[0]) if "battery_installed" in sol_cost else 1.0
-    battery_installed_emis = float(sol_emis["battery_installed"].iloc[0]) if "battery_installed" in sol_emis else 1.0
     annual_grid_use_hours_cost = annual_import_grid_use_hours(
         sol_cost["grid_import_kWh"].sum(),
         sol_cost["grid_export_kWh"].sum(),
@@ -165,14 +269,24 @@ def build_results_table(
     first_step_in_month = ~month_labels.duplicated()
     monthly_power_cost_cost = month_labels.map(monthly_peak_cost).astype(float) * power_tariff_cost
     monthly_power_cost_emis = month_labels.map(monthly_peak_emis).astype(float) * power_tariff_emis
-    annual_battery_fixed_cost_cost = (battery_capex + battery_annual_opex) * battery_installed_cost
-    annual_battery_fixed_cost_emis = (battery_capex + battery_annual_opex) * battery_installed_emis
-    cost_local_demand_series = pd.Series(
-        sol_cost["prod_for_local_demand_kWh"], index=results.index, dtype=float
-    )
-    emis_local_demand_series = pd.Series(
-        sol_emis["prod_for_local_demand_kWh"], index=results.index, dtype=float
-    )
+    annual_battery_fixed_cost_cost = (battery_capex + battery_annual_opex) * battery_capacity_kwh_cost
+    annual_battery_fixed_cost_emis = (battery_capex + battery_annual_opex) * battery_capacity_kwh_emis
+    annual_import_kwh = float(sol_cost["grid_import_kWh"].sum())
+    annual_export_kwh = float(sol_cost["grid_export_kWh"].sum())
+    batt_charge = float(sol_cost["battery_charge_kWh"].sum()) if "battery_charge_kWh" in sol_cost else 0.0
+    batt_discharge = float(sol_cost["battery_discharge_kWh"].sum()) if "battery_discharge_kWh" in sol_cost else 0.0
+    heatpump_elec = float(sol_cost["heatpump_elec_kWh"].sum()) if "heatpump_elec_kWh" in sol_cost else 0.0
+    annual_load_kwh = float(production_series.sum() + annual_import_kwh + batt_discharge - annual_export_kwh - batt_charge - heatpump_elec)
+    if annual_load_kwh > 0:
+        annual_self_sufficiency = 1.0 - (annual_import_kwh / annual_load_kwh)
+        annual_self_sufficiency = max(0.0, min(1.0, annual_self_sufficiency))
+    else:
+        annual_self_sufficiency = 1.0
+    if len(results) > 0:
+        results.loc[results.index[0], "cost_opt__annual_self_sufficiency_fraction"] = annual_self_sufficiency
+        results.loc[results.index[0], "cost_opt__annual_load_kwh"] = annual_load_kwh
+        results.loc[results.index[0], "cost_opt__annual_grid_import_kwh"] = annual_import_kwh
+    # `prod_for_local_demand` removed. Run-of-river cost/emissions are derived from production.
     if "woodchip_boiler_heat_kWhth" in sol_cost:
         cost_woodchip_heat_series = pd.Series(
             sol_cost["woodchip_boiler_heat_kWhth"], index=results.index, dtype=float
@@ -210,6 +324,20 @@ def build_results_table(
     results["emissions_opt__ptes_emissions_kgco2"] = 0.0
     results["cost_opt__heatpump_emissions_kgco2"] = 0.0
     results["emissions_opt__heatpump_emissions_kgco2"] = 0.0
+    results["cost_opt__battery_throughput_emissions_kgco2"] = (
+        (
+            results["cost_opt__battery_charge_kWh"]
+            + results["cost_opt__battery_discharge_kWh"]
+        )
+        * battery_throughput_emissions_per_kwh
+    )
+    results["emissions_opt__battery_throughput_emissions_kgco2"] = (
+        (
+            results["emissions_opt__battery_charge_kWh"]
+            + results["emissions_opt__battery_discharge_kWh"]
+        )
+        * battery_throughput_emissions_per_kwh
+    )
     results["cost_opt__woodchip_cost_rp"] = (
         cost_woodchip_heat_series * woodchip_cost_per_kwhth
     )
@@ -218,8 +346,14 @@ def build_results_table(
     results["cost_opt__E_elec_HP_kWh"] = pd.Series(
         sol_cost["heatpump_elec_kWh"], index=results.index, dtype=float
     ) if "heatpump_elec_kWh" in sol_cost else pd.Series(0.0, index=results.index, dtype=float)
+    cost_heatpump_source_emissions = heatpump_source_emissions_series("cost_opt")
+    results["cost_opt__heatpump_electricity_source_emissions_kgco2_per_kwh"] = cost_heatpump_source_emissions
+    results["cost_opt__heatpump_electricity_emissions_kgco2"] = (
+        results["cost_opt__heatpump_elec_kWh"] * cost_heatpump_source_emissions
+    ) if "cost_opt__heatpump_elec_kWh" in results else pd.Series(0.0, index=results.index, dtype=float)
     results["cost_opt__heatpump_emissions_kgco2"] = (
         cost_heatpump_heat_series * HEAT_PUMP_EMISSIONS["emissions_kgco2eq_per_kwhth"]
+        + results["cost_opt__heatpump_electricity_emissions_kgco2"]
     )
     results["cost_opt__ptes_charge_kWhth"] = pd.Series(
         sol_cost["ptes_charge_kWhth"], index=results.index, dtype=float
@@ -254,8 +388,14 @@ def build_results_table(
     results["emissions_opt__E_elec_HP_kWh"] = pd.Series(
         sol_emis["heatpump_elec_kWh"], index=results.index, dtype=float
     ) if "heatpump_elec_kWh" in sol_emis else pd.Series(0.0, index=results.index, dtype=float)
+    emis_heatpump_source_emissions = heatpump_source_emissions_series("emissions_opt")
+    results["emissions_opt__heatpump_electricity_source_emissions_kgco2_per_kwh"] = emis_heatpump_source_emissions
+    results["emissions_opt__heatpump_electricity_emissions_kgco2"] = (
+        results["emissions_opt__heatpump_elec_kWh"] * emis_heatpump_source_emissions
+    ) if "emissions_opt__heatpump_elec_kWh" in results else pd.Series(0.0, index=results.index, dtype=float)
     results["emissions_opt__heatpump_emissions_kgco2"] = (
         emis_heatpump_heat_series * HEAT_PUMP_EMISSIONS["emissions_kgco2eq_per_kwhth"]
+        + results["emissions_opt__heatpump_electricity_emissions_kgco2"]
     )
     results["emissions_opt__ptes_charge_kWhth"] = pd.Series(
         sol_emis["ptes_charge_kWhth"], index=results.index, dtype=float
@@ -282,12 +422,10 @@ def build_results_table(
         .fillna(0.0)
     )
     results["emissions_opt__thermal_revenue_rp"] = thermal_revenue_series
-    results["cost_opt__runofriver_profit_rp"] = (
-        cost_local_demand_series * runofriver_profit_per_kwh
-    )
-    results["emissions_opt__runofriver_profit_rp"] = (
-        emis_local_demand_series * runofriver_profit_per_kwh
-    )
+    runofriver_emis_per_kwh = RUNOFRIVER_EMISSIONS["emissions_kgco2eq_per_kwh_generated"]
+    results["cost_opt__runofriver_cost_rp"] = production_series * runofriver_cost_per_kwh
+    results["emissions_opt__runofriver_cost_rp"] = production_series * runofriver_cost_per_kwh
+    results["emissions_opt__runofriver_kgco2"] = production_series * runofriver_emis_per_kwh
     results.loc[first_step_in_month, "cost_opt__monthly_power_tariff_rp"] = monthly_power_cost_cost[first_step_in_month].values
     results.loc[first_step_in_month, "emissions_opt__monthly_power_tariff_rp"] = monthly_power_cost_emis[first_step_in_month].values
     if len(results) > 0:
@@ -304,12 +442,9 @@ def build_results_table(
         results.loc[results.index[0], "cost_opt__heatpump_fixed_cost_rp"] = heatpump_fixed_cost_rp
         results.loc[results.index[0], "emissions_opt__heatpump_fixed_cost_rp"] = heatpump_fixed_cost_rp
         
-        # PTES costs and emissions
         ptes_volume_cost = float(sol_cost["ptes_volume_m3"].iloc[0]) if "ptes_volume_m3" in sol_cost else 0.0
         ptes_volume_emis = float(sol_emis["ptes_volume_m3"].iloc[0]) if "ptes_volume_m3" in sol_emis else 0.0
         
-        # Compute PTES cost using the cost function (annualized over 30 years)
-        # Cost formula: CAPEX = specific_cost_chf_per_m3 * V, where specific_cost = coeff * V^exp
         def ptes_annual_cost_rp(volume):
             if volume <= 0:
                 return 0.0
@@ -327,7 +462,6 @@ def build_results_table(
         
         ptes_cost_rp_cost = ptes_annual_cost_rp(ptes_volume_cost)
         ptes_cost_rp_emis = ptes_annual_cost_rp(ptes_volume_emis)
-        # PTES emissions: embodied carbon per m³ per year
         ptes_emissions_cost = ptes_volume_cost * PTES_EMISSIONS["emissions_kgco2eq_per_m3"]
         ptes_emissions_emis = ptes_volume_emis * PTES_EMISSIONS["emissions_kgco2eq_per_m3"]
         
@@ -346,7 +480,7 @@ def build_results_table(
             results["cost_opt__battery_charge_kWh"]
             + results["cost_opt__battery_discharge_kWh"]
         )
-        - results["cost_opt__runofriver_profit_rp"]
+        + results["cost_opt__runofriver_cost_rp"]
         + results["cost_opt__woodchip_cost_rp"]
         - results["cost_opt__thermal_revenue_rp"]
         + results["cost_opt__monthly_power_tariff_rp"]
@@ -365,7 +499,7 @@ def build_results_table(
             results["emissions_opt__battery_charge_kWh"]
             + results["emissions_opt__battery_discharge_kWh"]
         )
-        - results["emissions_opt__runofriver_profit_rp"]
+        + results["emissions_opt__runofriver_cost_rp"]
         + results["emissions_opt__woodchip_cost_rp"]
         - results["emissions_opt__thermal_revenue_rp"]
         + results["emissions_opt__monthly_power_tariff_rp"]
@@ -381,6 +515,7 @@ def build_results_table(
         + cost_woodchip_heat_series * woodchip_emissions_per_kwhth
         + results["cost_opt__heatpump_emissions_kgco2"]
         + results["cost_opt__ptes_emissions_kgco2"]
+        + results["cost_opt__battery_throughput_emissions_kgco2"]
     )
 
     results["emissions_opt__step_emissions_kgco2"] = (
@@ -390,6 +525,7 @@ def build_results_table(
         + emis_woodchip_heat_series * woodchip_emissions_per_kwhth
         + results["emissions_opt__heatpump_emissions_kgco2"]
         + results["emissions_opt__ptes_emissions_kgco2"]
+        + results["emissions_opt__battery_throughput_emissions_kgco2"]
     )
 
     return results
@@ -401,16 +537,12 @@ def summarize_solution(
     heatdemand,
     spot_price,
     monthly_peak,
+    datetime_series=None,
 ):
-    battery_capacity_kwh = BATTERY_TECHNICAL["capacity_kwh"]
-    battery_capex = BATTERY_ECONOMIC["annual_capex_rp_per_kwh_amortized"] * battery_capacity_kwh
-    battery_annual_opex = (
-        BATTERY_ECONOMIC["annual_opex_rp_per_kwh_year"] * battery_capacity_kwh
-    )
     battery_degradation_cost = BATTERY_ECONOMIC["degradation_cost_rp_per_kwh_throughput"]
     grid_emissions = IMPORT_EMISSIONS["grid_emissions_kgco2_per_kwh"]
     export_emissions = EXPORT_EMISSIONS["export_emissions_kgco2_per_kwh"]
-    runofriver_profit_per_kwh = RUNOFRIVER_ECONOMIC["profit_rp_per_kwh"]
+    runofriver_cost_per_kwh = RUNOFRIVER_ECONOMIC.get("cost_rp_per_kwh", 0.0)
     runofriver_emissions_per_kwh = RUNOFRIVER_EMISSIONS["emissions_kgco2eq_per_kwh_generated"]
     woodchip_cost_per_kwhth = WOODCHIP_BOILER_ECONOMIC["cost_rp_per_kwhth_useful"]
     thermal_revenue_per_kwhth = WOODCHIP_BOILER_ECONOMIC["revenue_rp_per_kwhth_sold"]
@@ -419,19 +551,26 @@ def summarize_solution(
     heatpump_lifetime_years = HEAT_PUMP_ECONOMIC.get("heatpump_lifetime_years", 30)
     heatpump_annual_opex_pct = HEAT_PUMP_ECONOMIC.get("annual_opex_percentage_of_capex", 0.01)
     heatpump_emissions_per_kwhth = HEAT_PUMP_EMISSIONS["emissions_kgco2eq_per_kwhth"]
+    production_series = pd.Series(production, dtype=float)
+    heatpump_cop_series = (
+        pd.Series(heatpump_cop_profile(datetime_series), dtype=float)
+        if datetime_series is not None
+        else pd.Series([HEAT_PUMP_TECHNICAL["cop_monthly"][0]] * len(solution), dtype=float)
+    )
+    heatpump_source_emissions = HEAT_PUMP_EMISSIONS.get("electricity_source_emissions_kgco2_per_kwh")
+    if heatpump_source_emissions is None:
+        heatpump_source_emissions = grid_emissions
 
     spot_price_series = pd.Series(spot_price, dtype=float)
-    production_series = pd.Series(production, dtype=float)
-    battery_installed = float(solution["battery_installed"].iloc[0]) if "battery_installed" in solution else 1.0
+    battery_capacity = clean_zero(solution["battery_capacity_kwh"].iloc[0]) if "battery_capacity_kwh" in solution else BATTERY_TECHNICAL["capacity_kwh"]
     annual_import_kwh = float(solution["grid_import_kWh"].sum())
     annual_export_kwh = float(solution["grid_export_kWh"].sum())
     annual_grid_use_h = annual_import_grid_use_hours(annual_import_kwh, annual_export_kwh)
     power_tariff = power_tariff_rp_per_kw_per_month(annual_grid_use_h)
     annual_power_cost_rp = float(monthly_peak.astype(float).sum() * power_tariff)
-    annual_battery_fixed_cost_rp = (battery_capex + battery_annual_opex) * battery_installed
-    annual_runofriver_profit_rp = float(
-        solution["prod_for_local_demand_kWh"].sum() * runofriver_profit_per_kwh
-    )
+    annual_battery_fixed_cost_rp = (BATTERY_ECONOMIC["annual_capex_rp_per_kwh_amortized"] + BATTERY_ECONOMIC["annual_opex_rp_per_kwh_year"]) * battery_capacity
+    runofriver_cost_per_kwh = RUNOFRIVER_ECONOMIC.get("cost_rp_per_kwh", 0.0)
+    annual_runofriver_cost_rp = float(production_series.sum() * runofriver_cost_per_kwh)
     annual_battery_degradation_rp = float(
         battery_degradation_cost
         * (solution["battery_charge_kWh"].sum() + solution["battery_discharge_kWh"].sum())
@@ -471,7 +610,6 @@ def summarize_solution(
         + annual_heatpump_capex_rp * heatpump_annual_opex_pct
     )
     
-    # Compute PTES cost using the cost function (annualized over 30 years)
     def ptes_annual_cost_rp(volume):
         if volume <= 0:
             return 0.0
@@ -488,16 +626,36 @@ def summarize_solution(
         return annual_capex_rp + annual_opex_rp
     
     annual_ptes_fixed_cost_rp = ptes_annual_cost_rp(annual_ptes_volume_m3)
-    annual_heatpump_emissions_kgco2 = annual_heatpump_heat_kwhth * heatpump_emissions_per_kwhth
+    annual_heatpump_heat_series = pd.Series(solution["heatpump_heat_kWhth"], dtype=float) if "heatpump_heat_kWhth" in solution else pd.Series(0.0, dtype=float)
+    if isinstance(heatpump_source_emissions, pd.Series):
+        annual_heatpump_emissions_kgco2 = float(
+            (annual_heatpump_heat_series * heatpump_emissions_per_kwhth
+             + annual_heatpump_heat_series * heatpump_source_emissions / heatpump_cop_series).sum()
+        )
+    else:
+        annual_heatpump_emissions_kgco2 = float(
+            (annual_heatpump_heat_series * (
+                heatpump_emissions_per_kwhth + float(heatpump_source_emissions) / heatpump_cop_series
+            )).sum()
+        )
     annual_ptes_emissions_kgco2 = annual_ptes_volume_m3 * ptes_emissions_per_m3
+    annual_battery_throughput_kwh = float(
+        solution["battery_charge_kWh"].sum() + solution["battery_discharge_kWh"].sum()
+    )
+    annual_battery_throughput_emissions_kgco2 = annual_battery_throughput_kwh * (
+        BATTERY_EMISSIONS["lifecycle_emissions_kgco2_per_kwh_throughput"]
+        + BATTERY_EMISSIONS.get("battery_throughput_penalty_emissions", 0.0)
+    )
     annual_thermal_revenue_rp = float(pd.Series(heatdemand, dtype=float).sum()) * thermal_revenue_per_kwhth
+    battery_installed = clean_binary(solution["battery_installed"].iloc[0]) if "battery_installed" in solution else 0.0
+    ptes_installed = clean_binary(solution["ptes_installed"].iloc[0]) if "ptes_installed" in solution else 0.0
     
-    # Calculate annual profit = revenues - costs (aligned with profit-maximization objective)
+    #  annual profit = revenues - costs (aligned with profit-maximization objective)
     annual_profit_rp = (
-        annual_runofriver_profit_rp        # local generation revenue
         + annual_export_revenue_rp         # export revenue
         + annual_thermal_revenue_rp        # heat sales revenue
         - annual_import_cost_rp            # grid import cost
+        - annual_runofriver_cost_rp        # run-of-river production cost
         - annual_battery_degradation_rp    # battery cycling wear
         - annual_woodchip_cost_rp          # woodchip fuel cost
         - annual_power_cost_rp             # monthly power tariff
@@ -513,10 +671,12 @@ def summarize_solution(
         + annual_woodchip_heat_kwhth * woodchip_emissions_per_kwhth
         + annual_heatpump_emissions_kgco2
         + annual_ptes_emissions_kgco2
+        + annual_battery_throughput_emissions_kgco2
     )
 
     return {
         "battery_installed": battery_installed,
+        "ptes_installed": ptes_installed,
         "net_annual_profit_chf": net_annual_profit_chf,
         "annual_emissions_burden_kgco2": annual_emissions_burden_kgco2,
         "annual_grid_import_kwh": annual_import_kwh,
@@ -524,6 +684,7 @@ def summarize_solution(
         "annual_grid_use_h": annual_grid_use_h,
         "annual_battery_charge_kwh": float(solution["battery_charge_kWh"].sum()),
         "annual_battery_discharge_kwh": float(solution["battery_discharge_kWh"].sum()),
+        "annual_battery_throughput_emissions_kgco2": annual_battery_throughput_emissions_kgco2,
         "annual_woodchip_heat_kwhth": annual_woodchip_heat_kwhth,
         "annual_heatpump_heat_kwhth": annual_heatpump_heat_kwhth,
         "annual_heatpump_nominal_kwhth": annual_heatpump_nominal_kwhth,
@@ -534,10 +695,48 @@ def summarize_solution(
     }
 
 
-def save_results(results, output_path):
+def save_results(results, output_path, update_prefix=None):
+    """Save results to CSV.
+
+    If `update_prefix` is provided and the output file exists, only columns
+    starting with that prefix will be replaced/added in the existing file
+    (rows matched on `DateTime`). If the file does not exist, the full
+    `results` DataFrame is written.
+    """
     output_parent = Path(output_path).parent
     output_parent.mkdir(parents=True, exist_ok=True)
-    results.to_csv(output_path, index=False)
+
+    out_path = Path(output_path)
+    if update_prefix is None or not out_path.exists():
+        results.to_csv(output_path, index=False)
+        return
+
+    existing = pd.read_csv(output_path, parse_dates=["DateTime"]) if out_path.exists() else pd.DataFrame()
+    if existing.empty:
+        results.to_csv(output_path, index=False)
+        return
+
+    new = results.copy()
+    if "DateTime" not in existing.columns or "DateTime" not in new.columns:
+        results.to_csv(output_path, index=False)
+        return
+
+    existing["DateTime"] = pd.to_datetime(existing["DateTime"])
+    new["DateTime"] = pd.to_datetime(new["DateTime"])
+
+    existing = existing.set_index("DateTime")
+    new = new.set_index("DateTime")
+
+    cols_to_update = [c for c in new.columns if c.startswith(update_prefix)]
+    if not cols_to_update:
+        existing.reset_index().to_csv(output_path, index=False)
+        return
+
+    for col in cols_to_update:
+        existing[col] = new[col]
+
+    merged = existing.reset_index()
+    merged.to_csv(output_path, index=False)
 
 
 def print_summary(results, output_path):
@@ -579,3 +778,20 @@ def print_summary(results, output_path):
         "Emissions objective -> profit considering emission penalty [CHF]: "
         f"{cost_with_emission_penalty_emisobj_chf:,.2f}"
     )
+    if "cost_opt__annual_self_sufficiency_fraction" in results.columns:
+        ss = results["cost_opt__annual_self_sufficiency_fraction"].iloc[0]
+    else:
+        try:
+            annual_import = results["cost_opt__grid_import_kWh"].sum()
+            # Try reconstruct annual load using available columns
+            production = results.get("production_kWh", pd.Series(0.0, index=results.index)).sum()
+            batt_charge = results.get("cost_opt__battery_charge_kWh", pd.Series(0.0, index=results.index)).sum()
+            batt_discharge = results.get("cost_opt__battery_discharge_kWh", pd.Series(0.0, index=results.index)).sum()
+            annual_export = results.get("cost_opt__grid_export_kWh", pd.Series(0.0, index=results.index)).sum()
+            heatpump_elec = results.get("cost_opt__heatpump_elec_kWh", pd.Series(0.0, index=results.index)).sum()
+            annual_load = production + annual_import + batt_discharge - annual_export - batt_charge - heatpump_elec
+            ss = 1.0 - (annual_import / annual_load) if annual_load > 0 else 1.0
+        except Exception:
+            ss = None
+    if ss is not None:
+        print(f"Annual self-sufficiency (no-grid fraction): {ss*100:.2f}%")

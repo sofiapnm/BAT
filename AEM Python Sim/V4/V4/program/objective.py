@@ -1,14 +1,18 @@
 import gurobipy as gp
 from gurobipy import GRB
+import pandas as pd
 
-from parameters.battery import BATTERY_ECONOMIC, BATTERY_TECHNICAL
+from parameters.battery import BATTERY_ECONOMIC, BATTERY_EMISSIONS, BATTERY_TECHNICAL
 from parameters.grid_import import IMPORT_ECONOMIC, IMPORT_EMISSIONS
 from parameters.general import GENERAL
 from parameters.grid_export import EXPORT_ECONOMIC, EXPORT_EMISSIONS, EXPORT_TECHNICAL
 from parameters.heat_pump import (
     HEAT_PUMP_ECONOMIC,
     HEAT_PUMP_EMISSIONS,
+    HEAT_PUMP_TECHNICAL,
     generate_heatpump_cost_breakpoints,
+    heatpump_cop_profile,
+    heatpump_total_emissions_kgco2,
 )
 from parameters.runofriver import RUNOFRIVER_ECONOMIC, RUNOFRIVER_EMISSIONS
 from parameters.woodchip_boiler import WOODCHIP_BOILER_ECONOMIC, WOODCHIP_BOILER_EMISSIONS
@@ -22,8 +26,15 @@ def add_ptes_cost_constraint(model, ptes_volume, ptes_cost_var):
     
     Uses SOS2 (Special Ordered Set type 2) for piecewise linear interpolation.
     """
-    # Volume breakpoints (m³)
-    v_breakpoints = [0.1, 10, 50, 100, 200, 500, 1000, 2000, 5000]
+    # Volume breakpoints (m³).
+    # Start from a sensible base set and extend up to the configured maximum volume
+    base_breakpoints = [0.0, 0.1, 10, 50, 100, 200, 500, 1000, 2000, 5000]
+    ptes_max = PTES_TECHNICAL.get("volume_m3_max", 5000.0)
+    # Add common larger breakpoints and ensure the configured maximum is included
+    extra_breaks = [10000.0, 20000.0, ptes_max]
+    v_breakpoints = base_breakpoints + [b for b in extra_breaks if b > base_breakpoints[-1] and b <= ptes_max]
+    # Make unique and sorted to avoid duplicates
+    v_breakpoints = sorted(list(dict.fromkeys(v_breakpoints)))
     
     # Compute corresponding costs (rappen/year, annualized)
     def ptes_annual_cost_rp(v):
@@ -116,22 +127,49 @@ def add_heatpump_cost_constraint(model, heatpump_nominal_kwth, heatpump_cost_var
     )
 
 
-def build_annual_emissions_expr(vars_dict, production_kwh, n):
+def build_annual_emissions_expr(vars_dict, production_kwh, n, datetime_series=None):
     grid_import = vars_dict["grid_import"]
     grid_export = vars_dict["grid_export"]
+    batt_charge = vars_dict["batt_charge"]
+    batt_discharge = vars_dict["batt_discharge"]
     woodchip_heat = vars_dict["woodchip_boiler_heat_kWhth"]
     ptes_volume = vars_dict["ptes_volume_m3"]
     grid_emissions = IMPORT_EMISSIONS["grid_emissions_kgco2_per_kwh"]
     export_emissions = EXPORT_EMISSIONS["export_emissions_kgco2_per_kwh"]
+    battery_lifecycle_emissions = BATTERY_EMISSIONS[
+        "lifecycle_emissions_kgco2_per_kwh_throughput"
+    ]
+    battery_throughput_penalty = BATTERY_EMISSIONS.get(
+        "battery_throughput_penalty_emissions", 0.0
+    )
+    battery_throughput_emissions = (
+        battery_lifecycle_emissions + battery_throughput_penalty
+    )
     runofriver_emissions_per_kwh = RUNOFRIVER_EMISSIONS["emissions_kgco2eq_per_kwh_generated"]
     woodchip_emissions_per_kwhth = WOODCHIP_BOILER_EMISSIONS["emissions_kgco2eq_per_kwhth"]
     ptes_emissions_per_m3 = PTES_EMISSIONS["emissions_kgco2eq_per_m3"]
+    heatpump_heat = vars_dict["heatpump_heat_kWhth"]
+
+    electricity_source_emissions = HEAT_PUMP_EMISSIONS.get(
+        "electricity_source_emissions_kgco2_per_kwh"
+    )
+    if electricity_source_emissions is None:
+        electricity_source_emissions = grid_emissions
+
+    cop_profile = heatpump_cop_profile(datetime_series) if datetime_series is not None else [HEAT_PUMP_TECHNICAL["cop_monthly"][0]] * n
 
     return gp.quicksum(
         grid_import[t] * grid_emissions
         + grid_export[t] * export_emissions
+        + (batt_charge[t] + batt_discharge[t]) * battery_throughput_emissions
         + production_kwh[t] * runofriver_emissions_per_kwh
         + woodchip_heat[t] * woodchip_emissions_per_kwhth
+        + heatpump_total_emissions_kgco2(
+            heatpump_heat[t],
+            cop_profile[t],
+            direct_factor=HEAT_PUMP_EMISSIONS["emissions_kgco2eq_per_kwhth"],
+            electricity_source_factor=electricity_source_emissions,
+        )
         for t in range(n)
     ) + ptes_volume * ptes_emissions_per_m3  # Annual PTES embodied emissions
 
@@ -141,10 +179,12 @@ def add_objective(
     model,
     vars_dict,
     production_kwh,
+    elecdemand_kwh,
     heatdemand_kwhth,
     spot_price_rp_per_kwh,
     objective_mode,
     n,
+    datetime_series=None,
 ):
     grid_import = vars_dict["grid_import"]
     grid_export = vars_dict["grid_export"]
@@ -158,11 +198,12 @@ def add_objective(
     monthly_peak_kw = vars_dict["monthly_peak_kw"]
     unique_month_labels = vars_dict["unique_month_labels"]
 
-    battery_capacity_kwh = BATTERY_TECHNICAL["capacity_kwh"]
-    battery_capex = BATTERY_ECONOMIC["annual_capex_rp_per_kwh_amortized"] * battery_capacity_kwh
-    battery_annual_opex = (
-        BATTERY_ECONOMIC["annual_opex_rp_per_kwh_year"] * battery_capacity_kwh
-    )
+    # Use the sizing variable for battery capacity when computing fixed costs
+    battery_capacity_var = vars_dict.get("battery_capacity_kwh")
+    per_kwh_capex = BATTERY_ECONOMIC["annual_capex_rp_per_kwh_amortized"]
+    per_kwh_opex = BATTERY_ECONOMIC["annual_opex_rp_per_kwh_year"]
+    battery_capex = per_kwh_capex
+    battery_annual_opex = per_kwh_opex
     battery_degradation_cost = BATTERY_ECONOMIC["degradation_cost_rp_per_kwh_throughput"]
     grid_emissions = IMPORT_EMISSIONS["grid_emissions_kgco2_per_kwh"]
     export_emissions = EXPORT_EMISSIONS["export_emissions_kgco2_per_kwh"]
@@ -170,37 +211,38 @@ def add_objective(
     runofriver_emissions_per_kwh = RUNOFRIVER_EMISSIONS["emissions_kgco2eq_per_kwh_generated"]
     woodchip_cost_per_kwhth = WOODCHIP_BOILER_ECONOMIC["cost_rp_per_kwhth_useful"]
     thermal_revenue_per_kwhth = WOODCHIP_BOILER_ECONOMIC["revenue_rp_per_kwhth_sold"]
+    load_revenue_rp_per_kwh = RUNOFRIVER_ECONOMIC.get("load_revenue_rp_per_kwh", 0.0)
+    runofriver_cost_rp_per_kwh = RUNOFRIVER_ECONOMIC.get("cost_rp_per_kwh", 0.0)
     heatpump_lifetime_years = HEAT_PUMP_ECONOMIC["heatpump_lifetime_years"]
     heatpump_opex_percentage = HEAT_PUMP_ECONOMIC["annual_opex_percentage_of_capex"]
     heatpump_emissions_per_kwhth = HEAT_PUMP_EMISSIONS["emissions_kgco2eq_per_kwhth"]
+    heatpump_electricity_source_emissions = HEAT_PUMP_EMISSIONS.get(
+        "electricity_source_emissions_kgco2_per_kwh"
+    )
+    if heatpump_electricity_source_emissions is None:
+        heatpump_electricity_source_emissions = grid_emissions
+    cop_profile = heatpump_cop_profile(datetime_series) if datetime_series is not None else [HEAT_PUMP_TECHNICAL["cop_monthly"][0]] * n
     import_fixed_tariff = IMPORT_ECONOMIC["fixed_tariff_high_grid_use_rp_per_kwh"]
     export_fixed_tariff = EXPORT_ECONOMIC["fixed_tariff_high_grid_use_rp_per_kwh"]
     import_power_tariff = IMPORT_ECONOMIC["power_tariff_high_grid_use_rp_per_kw_per_month"]
     export_power_tariff = EXPORT_ECONOMIC["power_tariff_high_grid_use_rp_per_kw_per_month"]
 
-    # Build techno-economic cost framework for both modes so emissions runs
-    # remain techno-emissions optimizations with full cost accounting active.
     ptes_cost_var = model.addVar(lb=0.0, vtype=GRB.CONTINUOUS, name="ptes_annual_cost_rp")
     add_ptes_cost_constraint(model, ptes_volume, ptes_cost_var)
 
-    # Small throughput penalty to discourage excessive PTES cycling
     ptes_throughput_penalty = PTES_ECONOMIC.get("throughput_penalty_rp_per_kwh", 0.0)
     ptes_throughput_cost = gp.quicksum(
         ptes_throughput_penalty * (vars_dict["ptes_charge_kWhth"][t] + vars_dict["ptes_discharge_kWhth"][t])
         for t in range(n)
     )
 
-    # Add piecewise linear heat pump cost for nominal thermal power
     heatpump_capex_var = model.addVar(lb=0.0, vtype=GRB.CONTINUOUS, name="heatpump_annual_capex_rp")
     add_heatpump_cost_constraint(model, heatpump_nominal_kwth, heatpump_capex_var)
 
-    # Amortize the CAPEX over the heat pump lifetime
     heatpump_annual_capex_amortized = heatpump_capex_var / heatpump_lifetime_years
 
-    prod_for_local = vars_dict["prod_for_local_demand"]
-    local_production_revenue = gp.quicksum(
-        prod_for_local[t] * runofriver_profit_per_kwh
-        for t in range(n)
+    load_revenue = gp.quicksum(
+        elecdemand_kwh[t] * load_revenue_rp_per_kwh for t in range(n)
     )
     export_revenue = gp.quicksum(
         grid_export[t] * (spot_price_rp_per_kwh[t] - export_fixed_tariff)
@@ -210,7 +252,7 @@ def add_objective(
         heatdemand_kwhth[t] * thermal_revenue_per_kwhth for t in range(n)
     )
     annual_revenues = (
-        local_production_revenue
+        load_revenue
         + export_revenue
         + thermal_revenue
     )
@@ -229,9 +271,14 @@ def add_objective(
     power_tariff_cost = export_power_tariff * gp.quicksum(
         monthly_peak_kw[month_label] for month_label in unique_month_labels
     )
-    battery_fixed_cost = battery_installed * (battery_capex + battery_annual_opex)
-    # Heat pump costs from piecewise linear CAPEX approximation
-    # OPEX is calculated as a percentage of the variable CAPEX
+    if battery_capacity_var is not None:
+        battery_fixed_cost = battery_capacity_var * (battery_capex + battery_annual_opex)
+    else:
+        battery_capacity_kwh = BATTERY_TECHNICAL["capacity_kwh"]
+        battery_fixed_cost = battery_installed * (
+            battery_capex * battery_capacity_kwh + battery_annual_opex * battery_capacity_kwh
+        )
+
     heatpump_opex_cost = heatpump_capex_var * heatpump_opex_percentage
     heatpump_fixed_cost = (
         heatpump_annual_capex_amortized
@@ -249,15 +296,29 @@ def add_objective(
         + ptes_storage_cost
         + ptes_throughput_cost
     )
+    runofriver_cost = gp.quicksum(
+        production_kwh[t] * runofriver_cost_rp_per_kwh for t in range(n)
+    )
+    annual_costs = annual_costs + runofriver_cost
 
     annual_profit = annual_revenues - annual_costs
+    annual_emissions = vars_dict.get("annual_emissions_expr")
+    if annual_emissions is None:
+        annual_emissions = build_annual_emissions_expr(
+            vars_dict,
+            production_kwh,
+            n,
+            datetime_series=datetime_series,
+        )
+
+    vars_dict["annual_revenues_expr"] = annual_revenues
+    vars_dict["annual_costs_expr"] = annual_costs
+    vars_dict["annual_profit_expr"] = annual_profit
+    vars_dict["annual_emissions_expr"] = annual_emissions
 
     if objective_mode == "cost":
         model.setObjective(annual_profit, GRB.MAXIMIZE)
     elif objective_mode == "emissions":
-        expr = build_annual_emissions_expr(vars_dict, production_kwh, n) + gp.quicksum(
-            heatpump_heat[t] * heatpump_emissions_per_kwhth for t in range(n)
-        )
-        model.setObjective(expr, GRB.MINIMIZE)
+        model.setObjective(annual_emissions, GRB.MINIMIZE)
     else:
         raise ValueError(f"Unknown objective_mode: {objective_mode}")

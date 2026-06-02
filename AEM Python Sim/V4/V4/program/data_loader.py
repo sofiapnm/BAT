@@ -2,11 +2,6 @@ import pandas as pd
 
 
 def load_input_data(data_path):
-    """Load input profiles with explicit unit-safe demand naming.
-
-    - Electric demand: kWh_el
-    - Heat demand: kWh_th
-    """
     df = pd.read_csv(data_path)
     df["DateTime"] = pd.to_datetime(df["DateTime"])
     df = df.sort_values("DateTime").reset_index(drop=True)

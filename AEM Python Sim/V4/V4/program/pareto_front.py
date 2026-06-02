@@ -1,3 +1,4 @@
+import argparse
 from pathlib import Path
 
 import pandas as pd
@@ -5,16 +6,33 @@ import pandas as pd
 from model_builder import build_model, solve_model
 from parameters.battery import BATTERY_TECHNICAL
 from parameters.general import GENERAL
-from parameters.grid_import import (
-    annual_grid_use_hours as annual_import_grid_use_hours,
-    power_tariff_rp_per_kw_per_month,
-)
 from results import (
     extract_monthly_peak_solution,
     extract_solution,
     save_results,
     summarize_solution,
 )
+
+
+RESULTS_DIR = Path(__file__).resolve().parents[1] / "results"
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Run Pareto points one at a time or as a full sequence."
+    )
+    parser.add_argument(
+        "--point",
+        type=int,
+        default=None,
+        help="Run only one epsilon point by 1-based index.",
+    )
+    parser.add_argument(
+        "--pause-between-points",
+        action="store_true",
+        help="Pause for Enter between Pareto points.",
+    )
+    return parser.parse_args()
 
 
 def build_pareto_caps(min_emissions_kgco2, max_emissions_kgco2, num_points):
@@ -25,83 +43,74 @@ def build_pareto_caps(min_emissions_kgco2, max_emissions_kgco2, num_points):
     return [float(min_emissions_kgco2 + i * step) for i in range(1, num_points - 1)]
 
 
-def reconstruct_solution(results, prefix):
-    solution = pd.DataFrame(index=results.index)
-    for column in results.columns:
-        if column.startswith(prefix):
-            solution[column.removeprefix(prefix)] = results[column].astype(float)
-    return solution
-
-
-def reconstruct_monthly_peak(results, solution_prefix):
-    annual_import_kwh = float(results[f"{solution_prefix}grid_import_kWh"].sum())
-    annual_export_kwh = float(results[f"{solution_prefix}grid_export_kWh"].sum())
-    annual_grid_use_h = annual_import_grid_use_hours(annual_import_kwh, annual_export_kwh)
-    power_tariff = power_tariff_rp_per_kw_per_month(annual_grid_use_h)
-
-    month_labels = pd.to_datetime(results["DateTime"]).dt.to_period("M").astype(str)
-    first_step_in_month = ~month_labels.duplicated()
-    monthly_power_tariff = results.loc[
-        first_step_in_month, f"{solution_prefix}monthly_power_tariff_rp"
-    ].astype(float)
-    monthly_peak = monthly_power_tariff / power_tariff
-    monthly_peak.index = month_labels[first_step_in_month].values
-    return monthly_peak.astype(float)
-
-
 def load_anchor_summaries():
-    kwh_path = Path(GENERAL["kwh_output_path"])
-    output_path = Path(GENERAL["output_path"])
-    if not kwh_path.exists() or not output_path.exists():
+    cost_kwh_path = RESULTS_DIR / "cost_opt kWh results.csv"
+    emis_kwh_path = RESULTS_DIR / "emis_opt kWh results.csv"
+    
+    if not cost_kwh_path.exists() or not emis_kwh_path.exists():
+        missing = []
+        if not cost_kwh_path.exists():
+            missing.append("cost_opt kWh results.csv")
+        if not emis_kwh_path.exists():
+            missing.append("emis_opt kWh results.csv")
         raise FileNotFoundError(
-            "Run main.py first so both annual result files are available."
+            f"Run main.py twice to generate required files: {', '.join(missing)}.\n"
+            f"  python main.py cost\n"
+            f"  python main.py emission"
         )
 
-    kwh_results = pd.read_csv(kwh_path, parse_dates=["DateTime"])
-    results = pd.read_csv(output_path, parse_dates=["DateTime"])
+    cost_kwh_results = pd.read_csv(cost_kwh_path, parse_dates=["DateTime"])
+    emis_kwh_results = pd.read_csv(emis_kwh_path, parse_dates=["DateTime"])
 
-    cost_solution = kwh_results[
-        [
-            "battery_installed",
-            "grid_import_kWh",
-            "grid_export_kWh",
-            "battery_charge_kWh",
-            "battery_discharge_kWh",
-            "battery_soc_kWh",
-            "prod_for_local_demand_kWh",
-            "woodchip_boiler_heat_kWhth",
-            "heatpump_heat_kWhth",
-            "heatpump_elec_kWh",
-            "heatpump_nominal_kWhth",
-            "woodchip_heat_supply_share",
-            "heatpump_heat_supply_share",
-        ]
-    ].astype(float)
-    emissions_solution = reconstruct_solution(results, "emissions_opt__")
+    def compute_monthly_peak(series_kwh, delta_t_h):
+        s = pd.Series(series_kwh)
+        dt_index = pd.to_datetime(s.index)
+        month_labels = dt_index.to_period("M").astype(str)
+        kw = s.values / float(delta_t_h)
+        df = pd.DataFrame({"month": month_labels, "kw": kw})
+        peaks = df.groupby("month")["kw"].max()
+        return peaks
 
-    monthly_peak_cost = reconstruct_monthly_peak(results, "cost_opt__")
-    monthly_peak_emis = reconstruct_monthly_peak(results, "emissions_opt__")
+    delta_t = GENERAL["delta_t_h"]
+    monthly_peak_cost = compute_monthly_peak(cost_kwh_results.set_index(pd.to_datetime(cost_kwh_results["DateTime"]))["grid_import_kWh"], delta_t)
+    monthly_peak_emis = compute_monthly_peak(emis_kwh_results.set_index(pd.to_datetime(emis_kwh_results["DateTime"]))["grid_import_kWh"], delta_t)
 
     cost_summary = summarize_solution(
-        solution=cost_solution,
-        production=kwh_results["production_kWh"],
-        heatdemand=kwh_results["heatdemand_kWhth"],
-        spot_price=kwh_results["spot price [Rp/kWh]"],
+        solution=cost_kwh_results,
+        production=cost_kwh_results["production_kWh"],
+        heatdemand=cost_kwh_results["heatdemand_kWhth"],
+        spot_price=cost_kwh_results["spot price [Rp/kWh]"],
         monthly_peak=monthly_peak_cost,
+        datetime_series=cost_kwh_results["DateTime"],
     )
     emissions_summary = summarize_solution(
-        solution=emissions_solution,
-        production=kwh_results["production_kWh"],
-        heatdemand=kwh_results["heatdemand_kWhth"],
-        spot_price=kwh_results["spot price [Rp/kWh]"],
+        solution=emis_kwh_results,
+        production=emis_kwh_results["production_kWh"],
+        heatdemand=emis_kwh_results["heatdemand_kWhth"],
+        spot_price=emis_kwh_results["spot price [Rp/kWh]"],
         monthly_peak=monthly_peak_emis,
+        datetime_series=emis_kwh_results["DateTime"],
     )
 
-    return kwh_results, results, cost_summary, emissions_summary
+    return cost_kwh_results, emis_kwh_results, cost_summary, emissions_summary
+
+
+def upsert_pareto_row(output_path, new_row):
+    output_path = Path(output_path)
+    if output_path.exists():
+        existing = pd.read_csv(output_path)
+        combined = pd.concat([existing, pd.DataFrame([new_row])], ignore_index=True)
+        combined = combined.drop_duplicates(subset=["pareto_point"], keep="last")
+    else:
+        combined = pd.DataFrame([new_row])
+
+    combined = combined.sort_values(by="annual_emissions_burden_kgco2")
+    save_results(combined, output_path)
 
 
 def main():
-    kwh_results, results, cost_summary, emissions_summary = load_anchor_summaries()
+    args = parse_args()
+    cost_kwh_results, emis_kwh_results, cost_summary, emissions_summary = load_anchor_summaries()
 
     pareto_rows = [
         {
@@ -124,13 +133,28 @@ def main():
         BATTERY_TECHNICAL["soc_end_frac"] * BATTERY_TECHNICAL["capacity_kwh"]
     )
 
-    production = kwh_results["production_kWh"]
-    elecdemand = kwh_results["load_kWh"]
-    heatdemand = kwh_results["heatdemand_kWhth"]
-    spot_price = kwh_results["spot price [Rp/kWh]"]
-    datetime_series = kwh_results["DateTime"]
+    production = cost_kwh_results["production_kWh"]
+    elecdemand = cost_kwh_results["load_kWh"]
+    heatdemand = cost_kwh_results["heatdemand_kWhth"]
+    spot_price = cost_kwh_results["spot price [Rp/kWh]"]
+    datetime_series = cost_kwh_results["DateTime"]
+
+    total_epsilon_points = len(emissions_caps)
+    if args.point is not None:
+        if args.point < 1 or args.point > total_epsilon_points:
+            raise ValueError(
+                f"--point must be between 1 and {total_epsilon_points}. Got {args.point}."
+            )
+        emissions_caps = [emissions_caps[args.point - 1]]
 
     for i, emissions_cap in enumerate(emissions_caps):
+        point_number = args.point if args.point is not None else i + 1
+        if args.pause_between_points:
+            try:
+                input(f"Press Enter to run Pareto point {point_number}/{total_epsilon_points}...")
+            except EOFError:
+                pass
+
         model_pareto, vars_pareto = build_model(
             production_kwh=production,
             elecdemand_kwh=elecdemand,
@@ -142,7 +166,7 @@ def main():
             final_soc_kwh=full_horizon_end_soc,
             emissions_cap_kgco2=emissions_cap,
         )
-        solve_model(model_pareto, objective_mode=f"pareto_cost_cap_{i}")
+        solve_model(model_pareto, objective_mode=f"pareto_cost_cap_{point_number}")
         sol_pareto = extract_solution(vars_pareto, len(elecdemand))
         monthly_peak_pareto = extract_monthly_peak_solution(vars_pareto)
         pareto_summary = summarize_solution(
@@ -151,22 +175,24 @@ def main():
             heatdemand=heatdemand,
             spot_price=spot_price,
             monthly_peak=monthly_peak_pareto,
+            datetime_series=datetime_series,
         )
         pareto_rows.append(
             {
-                "pareto_point": i + 1,
+                "pareto_point": point_number,
                 "scenario": "epsilon_constrained_cost",
                 "emissions_cap_kgco2": emissions_cap,
                 **pareto_summary,
             }
         )
-        save_results(
-            pd.DataFrame(pareto_rows).sort_values(by="annual_emissions_burden_kgco2"),
-            GENERAL["pareto_output_path"],
-        )
+        upsert_pareto_row(GENERAL["pareto_output_path"], pareto_rows[-1])
         print(
-            f"Pareto progress: {i + 1}/{len(emissions_caps)} points saved to {GENERAL['pareto_output_path']}"
+            f"Pareto progress: {point_number}/{total_epsilon_points} points saved to {GENERAL['pareto_output_path']}"
         )
+
+        if args.point is not None:
+            print("Checkpoint mode complete after one Pareto point.")
+            return
 
     pareto_rows.append(
         {

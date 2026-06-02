@@ -1,15 +1,53 @@
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import sys
 
-CSV_PATH = "/workspaces/BAT/AEM Python Sim/V4/V4/results/kWh Results.csv"
-HTML_OUTPUT_PATH = "/workspaces/BAT/AEM Python Sim/V4/V4/results/plots/kW dispatch plot.html"
-PLOT_OBJECTIVE_LABEL = "cost-optimized solution"
 TIMESTEP_HOURS = 0.25
 FLOW_TO_KW = 1.0 / TIMESTEP_HOURS
 
 
-def build_figure(dataframe):
+def _resolve_energy_balance_mode():
+    """Prompt user to choose between profit or emission energy balance."""
+    mode_raw = sys.argv[1] if len(sys.argv) > 1 else None
+    
+    if mode_raw is None:
+        mode_raw = input("Choose energy balance ('profit' or 'emission'): ")
+    
+    mode = str(mode_raw).strip().lower()
+    mapping = {
+        "profit": "cost",
+        "cost": "cost",
+        "emission": "emissions",
+        "emissions": "emissions",
+    }
+    resolved = mapping.get(mode)
+    if resolved is None:
+        raise ValueError(
+            f"Invalid energy balance mode '{mode_raw}'. Use 'profit' or 'emission'."
+        )
+    return resolved
+
+
+def get_csv_path_and_label(objective_mode):
+    """Return CSV path and label based on objective mode."""
+    results_dir = "/workspaces/BAT/AEM Python Sim/V4/V4/results"
+    if objective_mode == "cost":
+        return (
+            f"{results_dir}/cost_opt kWh results.csv",
+            "cost-optimized solution",
+        )
+    else:
+        return (
+            f"{results_dir}/emis_opt kWh results.csv",
+            "emissions-optimized solution",
+        )
+
+
+HTML_OUTPUT_PATH = "/workspaces/BAT/AEM Python Sim/V4/V4/results/plots/kW dispatch plot.html"
+
+
+def build_figure(dataframe, plot_objective_label):
     dataframe = dataframe.copy()
 
     # Convert 15-minute energy flows [kWh per timestep] to average power [kW].
@@ -30,7 +68,7 @@ def build_figure(dataframe):
     fig = make_subplots(
         rows=3,
         cols=1,
-        specs=[[{"secondary_y": True}], [{"secondary_y": True}], [{"secondary_y": False}]],
+        specs=[[{"secondary_y": True}], [{"secondary_y": True}], [{"secondary_y": True}]],
         subplot_titles=(
             "Electricity Dispatch Optimization",
             "Thermal Dispatch Optimization",
@@ -112,18 +150,39 @@ def build_figure(dataframe):
             secondary_y=False,
         )
 
+    # Add spot price to the electricity subplot (row 1) on a secondary axis
     fig.add_trace(
         go.Scatter(
             x=dataframe["DateTime"],
             y=dataframe["spot price [Rp/kWh]"],
             mode="lines",
             name="spot price [Rp/kWh]",
-            line={"width": 1, "color": colors["spot price [Rp/kWh]"]},
+            line={"width": 1, "color": colors["spot price [Rp/kWh]"], "dash": "dot"},
         ),
-        row=3,
+        row=1,
         col=1,
-        secondary_y=False,
+        secondary_y=True,
     )
+
+    # Move the spot-price trace to a tertiary y-axis overlaying the electricity subplot
+    spot_indices = [i for i, t in enumerate(fig.data) if getattr(t, "name", None) == "spot price [Rp/kWh]"]
+    if spot_indices:
+        idx = spot_indices[-1]
+        fig.data[idx].update(yaxis="y7")
+
+        fig.update_layout(
+            yaxis7=dict(
+                title="Rp/kWh (spot price)",
+                range=[-20, 40],
+                overlaying="y",
+                side="right",
+                position=0.95,
+                anchor="x1",
+                showgrid=False,
+            )
+        )
+
+    # (Battery and PTES SoC are plotted in their original subplots below)
 
     fig.add_trace(
         go.Scatter(
@@ -146,7 +205,6 @@ def build_figure(dataframe):
         row=1,
         col=1,
     )
-
     # Thermal plot (Row 2)
     if "heatpump_heat_kWhth" in dataframe.columns:
         dataframe = dataframe.copy()
@@ -194,7 +252,7 @@ def build_figure(dataframe):
             y=dataframe["ptes_soc_kWhth"],
             mode="lines",
             name="ptes_soc_kWhth",
-            line={"width": 2, "color": "#bcbd22", "dash": "dash"},
+            line={"width": 2, "color": "#2225bd", "dash": "dash"},
             showlegend=True,
         ),
         row=2,
@@ -219,6 +277,7 @@ def build_figure(dataframe):
         secondary_y=False,
         row=1,
     )
+    # Secondary axis on electricity subplot used for battery SoC
     fig.update_yaxes(title_text="kWh (Battery SoC)", secondary_y=True, row=1)
     fig.update_yaxes(
         title_text="kW",
@@ -228,17 +287,10 @@ def build_figure(dataframe):
         row=2,
     )
     fig.update_yaxes(title_text="kWh (PTES SoC)", secondary_y=True, row=2)
-    fig.update_yaxes(
-        title_text="Rp/kWh",
-        range=[-20, 40],
-        zeroline=True,
-        zerolinewidth=1,
-        secondary_y=False,
-        row=3,
-    )
+    # (Spot Price subplot left intentionally without price traces; axes controlled in other subplots)
 
     fig.update_layout(
-        title=f"BESS+HP+PTES Energy Balance Analysis ({PLOT_OBJECTIVE_LABEL})",
+        title=f"BESS+PTES+HP Energy Balance Analysis ({plot_objective_label})",
         template="plotly_white",
         hovermode="x unified",
         height=1300,
@@ -249,12 +301,15 @@ def build_figure(dataframe):
 
 
 def main():
-    df = pd.read_csv(CSV_PATH)
+    objective_mode = _resolve_energy_balance_mode()
+    csv_path, plot_label = get_csv_path_and_label(objective_mode)
+    
+    df = pd.read_csv(csv_path)
     df["DateTime"] = pd.to_datetime(df["DateTime"])
 
-    fig = build_figure(df)
+    fig = build_figure(df, plot_label)
     fig.add_annotation(
-        text="Source: kWh Results.csv built from the cost objective solution",
+        text=f"Source: {objective_mode.capitalize()}-optimized kWh results.csv",
         xref="paper",
         yref="paper",
         x=0,

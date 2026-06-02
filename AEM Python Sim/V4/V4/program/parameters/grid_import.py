@@ -1,10 +1,8 @@
 IMPORT_TECHNICAL = {
-    # Arbitrary placeholder value: not used in your original model yet
     "existing_grid_limit_mw": 4.0,
 }
 
 IMPORT_ECONOMIC = {
-    # The time-varying import price profile still comes from the CSV.
     "expansion_cost_rp_per_mw": 5000000.0,
     "fixed_tariff_high_grid_use_rp_per_kwh": 1.08,
     "fixed_tariff_low_grid_use_rp_per_kwh": 3.28,

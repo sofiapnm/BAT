@@ -1,5 +1,4 @@
 EXPORT_TECHNICAL = {
-    # Arbitrary placeholder value: not used in your original model yet
     "existing_grid_limit_mw": 4.0,
 }
 
