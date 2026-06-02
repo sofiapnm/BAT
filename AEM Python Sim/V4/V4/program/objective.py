@@ -227,26 +227,20 @@ def add_objective(
     import_power_tariff = IMPORT_ECONOMIC["power_tariff_high_grid_use_rp_per_kw_per_month"]
     export_power_tariff = EXPORT_ECONOMIC["power_tariff_high_grid_use_rp_per_kw_per_month"]
 
-    # Build techno-economic cost framework for both modes so emissions runs
-    # remain techno-emissions optimizations with full cost accounting active.
     ptes_cost_var = model.addVar(lb=0.0, vtype=GRB.CONTINUOUS, name="ptes_annual_cost_rp")
     add_ptes_cost_constraint(model, ptes_volume, ptes_cost_var)
 
-    # Small throughput penalty to discourage excessive PTES cycling
     ptes_throughput_penalty = PTES_ECONOMIC.get("throughput_penalty_rp_per_kwh", 0.0)
     ptes_throughput_cost = gp.quicksum(
         ptes_throughput_penalty * (vars_dict["ptes_charge_kWhth"][t] + vars_dict["ptes_discharge_kWhth"][t])
         for t in range(n)
     )
 
-    # Add piecewise linear heat pump cost for nominal thermal power
     heatpump_capex_var = model.addVar(lb=0.0, vtype=GRB.CONTINUOUS, name="heatpump_annual_capex_rp")
     add_heatpump_cost_constraint(model, heatpump_nominal_kwth, heatpump_capex_var)
 
-    # Amortize the CAPEX over the heat pump lifetime
     heatpump_annual_capex_amortized = heatpump_capex_var / heatpump_lifetime_years
 
-    # Revenue paid for meeting electrical demand (source-agnostic)
     load_revenue = gp.quicksum(
         elecdemand_kwh[t] * load_revenue_rp_per_kwh for t in range(n)
     )
@@ -277,17 +271,14 @@ def add_objective(
     power_tariff_cost = export_power_tariff * gp.quicksum(
         monthly_peak_kw[month_label] for month_label in unique_month_labels
     )
-    # Battery fixed cost scales linearly with chosen capacity (kWh)
     if battery_capacity_var is not None:
         battery_fixed_cost = battery_capacity_var * (battery_capex + battery_annual_opex)
     else:
-        # Fallback to previous behavior using installed flag and nominal capacity
         battery_capacity_kwh = BATTERY_TECHNICAL["capacity_kwh"]
         battery_fixed_cost = battery_installed * (
             battery_capex * battery_capacity_kwh + battery_annual_opex * battery_capacity_kwh
         )
-    # Heat pump costs from piecewise linear CAPEX approximation
-    # OPEX is calculated as a percentage of the variable CAPEX
+
     heatpump_opex_cost = heatpump_capex_var * heatpump_opex_percentage
     heatpump_fixed_cost = (
         heatpump_annual_capex_amortized
@@ -305,7 +296,6 @@ def add_objective(
         + ptes_storage_cost
         + ptes_throughput_cost
     )
-    # Run-of-river marginal generation cost (applies per timestep production)
     runofriver_cost = gp.quicksum(
         production_kwh[t] * runofriver_cost_rp_per_kwh for t in range(n)
     )

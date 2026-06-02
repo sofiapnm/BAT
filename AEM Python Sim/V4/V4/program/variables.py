@@ -25,15 +25,13 @@ def add_variables(model, n):
     else:
         raise ValueError(f"Unknown BATTERY_MODE: {BATTERY_MODE}")
 
-    # Battery capacity sizing variable [kWh]
     cap_min = BATTERY_TECHNICAL.get("capacity_kwh_min", BATTERY_TECHNICAL["capacity_kwh"])
     cap_max = BATTERY_TECHNICAL.get("capacity_kwh_max", BATTERY_TECHNICAL["capacity_kwh"])
     vars_dict["battery_capacity_kwh"] = model.addVar(
         lb=0.0, ub=cap_max, vtype=GRB.CONTINUOUS, name="battery_capacity_kwh"
     )
 
-    # Link capacity to install decision: if not installed capacity == 0,
-    # if installed enforce min capacity and allow up to max.
+
     model.addConstr(
         vars_dict["battery_capacity_kwh"] <= vars_dict["battery_installed"] * cap_max,
         name="battery_capacity_upper_if_installed",
@@ -65,43 +63,31 @@ def add_variables(model, n):
             n, vtype=GRB.BINARY, name="batt_charge_mode"
         )
 
-    # SOC variables: allow up to the maximum possible capacity
     cap_max = BATTERY_TECHNICAL.get("capacity_kwh_max", BATTERY_TECHNICAL["capacity_kwh"])
     vars_dict["soc"] = model.addVars(
         n, lb=0.0, ub=cap_max, vtype=GRB.CONTINUOUS, name="soc"
     )
-
-    # Production allocated to meet local demand (remainder goes to export/battery)
-    # `prod_for_local_demand` removed — production is fixed and reported via input series
-
-    # Thermal production from woodchip boiler [kWh_th]
     vars_dict["woodchip_boiler_heat_kWhth"] = model.addVars(
         n, lb=0.0, vtype=GRB.CONTINUOUS, name="woodchip_boiler_heat_kWhth"
     )
 
-
-    # Heat pump thermal output [kWh_th]
     vars_dict["heatpump_heat_kWhth"] = model.addVars(
         n, lb=0.0, vtype=GRB.CONTINUOUS, name="heatpump_heat_kWhth"
     )
 
-    # Heat pump electrical demand [kWh_el]
     vars_dict["heatpump_elec_kWh"] = model.addVars(
         n, lb=0.0, vtype=GRB.CONTINUOUS, name="heatpump_elec_kWh"
     )
 
     if HEAT_PUMP_TECHNICAL.get("enforce_modulation_binary", False):
-        # Heat pump on/off state (used to enforce exact modulation limits)
         vars_dict["heatpump_on"] = model.addVars(
             n, vtype=GRB.BINARY, name="heatpump_on"
         )
 
-    # Heat pump nominal thermal power [kW_th]
     vars_dict["heatpump_nominal_kwth"] = model.addVar(
         lb=0.0, vtype=GRB.CONTINUOUS, name="heatpump_nominal_kwth"
     )
 
-    # Woodchip boiler nominal thermal power [kW_th]
     vars_dict["woodchip_nominal_kwth"] = model.addVar(
         lb=0.0, ub=5200.0, vtype=GRB.CONTINUOUS, name="woodchip_nominal_kwth"
     )
@@ -122,7 +108,6 @@ def add_variables(model, n):
     else:
         raise ValueError(f"Unknown PTES_MODE: {PTES_MODE}")
 
-    # PTES (Pit Thermal Energy Storage) variables [kWh_th]
     vars_dict["ptes_charge_kWhth"] = model.addVars(
         n, lb=0.0, vtype=GRB.CONTINUOUS, name="ptes_charge_kWhth"
     )
@@ -131,18 +116,15 @@ def add_variables(model, n):
         n, lb=0.0, vtype=GRB.CONTINUOUS, name="ptes_discharge_kWhth"
     )
 
-    # Optional PTES charge/discharge exclusivity binary.
     if GENERAL.get("use_ptes_exclusivity", False):
         vars_dict["ptes_charge_mode"] = model.addVars(
             n, vtype=GRB.BINARY, name="ptes_charge_mode"
         )
 
-    # PTES state of charge [kWh_th]
     vars_dict["ptes_soc_kWhth"] = model.addVars(
         n, lb=0.0, vtype=GRB.CONTINUOUS, name="ptes_soc_kWhth"
     )
 
-    # PTES storage volume sizing variable [m³]
     ptes_volume_max = PTES_TECHNICAL["volume_m3_max"]
     vars_dict["ptes_volume_m3"] = model.addVar(
         lb=0.0, ub=ptes_volume_max, vtype=GRB.CONTINUOUS, name="ptes_volume_m3"

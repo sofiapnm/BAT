@@ -44,7 +44,6 @@ def build_pareto_caps(min_emissions_kgco2, max_emissions_kgco2, num_points):
 
 
 def load_anchor_summaries():
-    # Load the two kWh results CSVs directly (cost_opt and emis_opt) — no longer use obsolete Cost+Emi Results.csv
     cost_kwh_path = RESULTS_DIR / "cost_opt kWh results.csv"
     emis_kwh_path = RESULTS_DIR / "emis_opt kWh results.csv"
     
@@ -63,7 +62,6 @@ def load_anchor_summaries():
     cost_kwh_results = pd.read_csv(cost_kwh_path, parse_dates=["DateTime"])
     emis_kwh_results = pd.read_csv(emis_kwh_path, parse_dates=["DateTime"])
 
-    # Helper to compute monthly peak from kWh grid_import series
     def compute_monthly_peak(series_kwh, delta_t_h):
         s = pd.Series(series_kwh)
         dt_index = pd.to_datetime(s.index)
@@ -135,7 +133,6 @@ def main():
         BATTERY_TECHNICAL["soc_end_frac"] * BATTERY_TECHNICAL["capacity_kwh"]
     )
 
-    # Use cost_kwh_results as the baseline data (production, demand, etc. are same for both optimizations)
     production = cost_kwh_results["production_kWh"]
     elecdemand = cost_kwh_results["load_kWh"]
     heatdemand = cost_kwh_results["heatdemand_kWhth"]

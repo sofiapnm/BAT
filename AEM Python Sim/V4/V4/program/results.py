@@ -105,7 +105,6 @@ def build_kwh_results_table(
         spot_price_profile, index=results.index, dtype=float
     )
 
-    # Add monthly COP profile
     datetime_s = pd.to_datetime(datetime_series)
     months = datetime_s.dt.month.values
     cop_monthly = HEAT_PUMP_TECHNICAL["cop_monthly"]
@@ -125,8 +124,8 @@ def build_kwh_results_table(
         results["ptes_discharge_kWhth"].div(heatdemand_nonzero).fillna(0.0)
     )
 
-    # Simple self-sufficiency metric: fraction of load met without grid imports
-    # Per-step: 1 - grid_import / load (if load == 0 => set to 1.0)
+    # self-sufficiency metric: fraction of load met without grid imports
+    # per]-step: 1 - grid_import / load (if load == 0 => set to 1.0)
     load_series = results["load_kWh"]
     grid_import_series = results.get("grid_import_kWh", pd.Series(0.0, index=results.index, dtype=float))
     # Avoid division by zero: where load==0, define self-sufficiency as 1.0
@@ -134,33 +133,21 @@ def build_kwh_results_table(
     self_suff = self_suff.fillna(1.0).clip(lower=0.0, upper=1.0)
     results["self_sufficiency"] = self_suff
 
-    # Production-traced self-sufficiency: account for direct production to load
-    # and battery discharge that originated from production.
-    # Assumptions:
-    # - Production is prioritized to meet local load, then to charge the battery, then exported.
-    # - Battery SOC is tracked in same units as `battery_soc_kWh` in solution.
-    # - Charging stores `charge_eff * batt_charge` in SOC; discharging removes `batt_discharge` from SOC
-    #   and delivers `discharge_eff * batt_discharge` to the load (matching model conventions).
+
     from parameters.battery import BATTERY_TECHNICAL
     charge_eff = BATTERY_TECHNICAL.get("charge_eff", 1.0)
     discharge_eff = BATTERY_TECHNICAL.get("discharge_eff", 1.0)
-
-    # Prepare series (ensure present)
     prod = results["production_kWh"].fillna(0.0)
     load = results["load_kWh"].fillna(0.0)
     batt_charge = results.get("battery_charge_kWh", pd.Series(0.0, index=results.index)).fillna(0.0)
     batt_discharge = results.get("battery_discharge_kWh", pd.Series(0.0, index=results.index)).fillna(0.0)
     grid_import = results.get("grid_import_kWh", pd.Series(0.0, index=results.index)).fillna(0.0)
-
-    # Initialize tracing state
     n_steps = len(results)
     soc_from_prod = [0.0] * n_steps
     soc_from_grid = [0.0] * n_steps
     direct_prod_to_load = [0.0] * n_steps
     prod_to_batt_charge = [0.0] * n_steps
     prod_via_batt_to_load = [0.0] * n_steps
-
-    # Initial SOC split: assume starting SOC entirely from grid (conservative)
     prev_soc_prod = 0.0
     prev_soc_grid = results["battery_soc_kWh"].iloc[0] if "battery_soc_kWh" in results and len(results) > 0 else 0.0
 
@@ -170,24 +157,16 @@ def build_kwh_results_table(
         bc = float(batt_charge.iloc[t])
         bd = float(batt_discharge.iloc[t])
         gi = float(grid_import.iloc[t])
-
-        # 1) Production directly to load
         direct = min(p, L)
         direct_prod_to_load[t] = direct
         remaining_prod = max(0.0, p - direct)
-
-        # 2) Production used to charge battery (up to batt_charge)
         prod_charge = min(remaining_prod, bc)
         prod_to_batt_charge[t] = prod_charge
         grid_to_batt_charge = max(0.0, bc - prod_charge)
-
-        # 3) Update SOC pools after charging (stored amount is charge_eff * charge_energy)
         soc_prod_after_charge = prev_soc_prod + charge_eff * prod_charge
         soc_grid_after_charge = prev_soc_grid + charge_eff * grid_to_batt_charge
 
         soc_total_after_charge = soc_prod_after_charge + soc_grid_after_charge
-
-        # 4) On discharge, draw from SOC pools proportionally
         if soc_total_after_charge > 0 and bd > 0:
             frac_prod = soc_prod_after_charge / soc_total_after_charge
             draw_prod = frac_prod * bd
@@ -195,11 +174,7 @@ def build_kwh_results_table(
         else:
             draw_prod = 0.0
             draw_grid = 0.0
-
-        # Energy delivered to load from battery that originated from production
         prod_via_batt_to_load[t] = discharge_eff * draw_prod
-
-        # 5) Update SOC for next step (after discharge)
         next_soc_prod = max(0.0, soc_prod_after_charge - draw_prod)
         next_soc_grid = max(0.0, soc_grid_after_charge - draw_grid)
 
@@ -213,12 +188,9 @@ def build_kwh_results_table(
     results["prod_to_batt_charge_kWh"] = pd.Series(prod_to_batt_charge, index=results.index, dtype=float)
     results["prod_via_batt_to_load_kWh"] = pd.Series(prod_via_batt_to_load, index=results.index, dtype=float)
     results["own_production_supply_kWh"] = results["direct_prod_to_load_kWh"] + results["prod_via_batt_to_load_kWh"]
-    # Production-traced per-step self-sufficiency
     own_supply = results["own_production_supply_kWh"]
     per_step_ss = own_supply.div(results["load_kWh"].replace(0.0, pd.NA)).fillna(1.0).clip(lower=0.0, upper=1.0)
     results["self_sufficiency_production_traced"] = per_step_ss
-
-    # Annual production-traced metric
     annual_own_supply = float(results["own_production_supply_kWh"].sum())
     annual_load = float(results["load_kWh"].sum())
     annual_prod_traced_ss = 1.0 if annual_load == 0 else max(0.0, min(1.0, annual_own_supply / annual_load))
@@ -250,7 +222,6 @@ def build_results_table(
     for col in sol_emis.columns:
         results[f"emissions_opt__{col}"] = sol_emis[col].values
 
-    # Use chosen capacity from solution (kWh) and per-kWh economic params
     battery_capacity_kwh_cost = float(sol_cost["battery_capacity_kwh"].iloc[0]) if "battery_capacity_kwh" in sol_cost else BATTERY_TECHNICAL["capacity_kwh"]
     battery_capacity_kwh_emis = float(sol_emis["battery_capacity_kwh"].iloc[0]) if "battery_capacity_kwh" in sol_emis else BATTERY_TECHNICAL["capacity_kwh"]
     battery_capex = BATTERY_ECONOMIC["annual_capex_rp_per_kwh_amortized"]
@@ -284,7 +255,6 @@ def build_results_table(
 
     spot_price_series = pd.Series(spot_price, index=results.index, dtype=float)
     production_series = pd.Series(production, index=results.index, dtype=float)
-    # Annual fixed cost scales with chosen capacity (kWh)
     annual_grid_use_hours_cost = annual_import_grid_use_hours(
         sol_cost["grid_import_kWh"].sum(),
         sol_cost["grid_export_kWh"].sum(),
@@ -301,20 +271,17 @@ def build_results_table(
     monthly_power_cost_emis = month_labels.map(monthly_peak_emis).astype(float) * power_tariff_emis
     annual_battery_fixed_cost_cost = (battery_capex + battery_annual_opex) * battery_capacity_kwh_cost
     annual_battery_fixed_cost_emis = (battery_capex + battery_annual_opex) * battery_capacity_kwh_emis
-    # Annual self-sufficiency: compute from solution series and production
     annual_import_kwh = float(sol_cost["grid_import_kWh"].sum())
     annual_export_kwh = float(sol_cost["grid_export_kWh"].sum())
     batt_charge = float(sol_cost["battery_charge_kWh"].sum()) if "battery_charge_kWh" in sol_cost else 0.0
     batt_discharge = float(sol_cost["battery_discharge_kWh"].sum()) if "battery_discharge_kWh" in sol_cost else 0.0
     heatpump_elec = float(sol_cost["heatpump_elec_kWh"].sum()) if "heatpump_elec_kWh" in sol_cost else 0.0
-    # Reconstruct annual load from energy balance: load = production + grid_import + batt_discharge - grid_export - batt_charge - heatpump_elec
     annual_load_kwh = float(production_series.sum() + annual_import_kwh + batt_discharge - annual_export_kwh - batt_charge - heatpump_elec)
     if annual_load_kwh > 0:
         annual_self_sufficiency = 1.0 - (annual_import_kwh / annual_load_kwh)
         annual_self_sufficiency = max(0.0, min(1.0, annual_self_sufficiency))
     else:
         annual_self_sufficiency = 1.0
-    # Expose annual metrics as columns on the first row for easy reporting
     if len(results) > 0:
         results.loc[results.index[0], "cost_opt__annual_self_sufficiency_fraction"] = annual_self_sufficiency
         results.loc[results.index[0], "cost_opt__annual_load_kwh"] = annual_load_kwh
@@ -455,7 +422,6 @@ def build_results_table(
         .fillna(0.0)
     )
     results["emissions_opt__thermal_revenue_rp"] = thermal_revenue_series
-    # Run-of-river generation cost (per-kWh cost applied to production)
     runofriver_emis_per_kwh = RUNOFRIVER_EMISSIONS["emissions_kgco2eq_per_kwh_generated"]
     results["cost_opt__runofriver_cost_rp"] = production_series * runofriver_cost_per_kwh
     results["emissions_opt__runofriver_cost_rp"] = production_series * runofriver_cost_per_kwh
@@ -476,12 +442,9 @@ def build_results_table(
         results.loc[results.index[0], "cost_opt__heatpump_fixed_cost_rp"] = heatpump_fixed_cost_rp
         results.loc[results.index[0], "emissions_opt__heatpump_fixed_cost_rp"] = heatpump_fixed_cost_rp
         
-        # PTES costs and emissions
         ptes_volume_cost = float(sol_cost["ptes_volume_m3"].iloc[0]) if "ptes_volume_m3" in sol_cost else 0.0
         ptes_volume_emis = float(sol_emis["ptes_volume_m3"].iloc[0]) if "ptes_volume_m3" in sol_emis else 0.0
         
-        # Compute PTES cost using the cost function (annualized over 30 years)
-        # Cost formula: CAPEX = specific_cost_chf_per_m3 * V, where specific_cost = coeff * V^exp
         def ptes_annual_cost_rp(volume):
             if volume <= 0:
                 return 0.0
@@ -499,7 +462,6 @@ def build_results_table(
         
         ptes_cost_rp_cost = ptes_annual_cost_rp(ptes_volume_cost)
         ptes_cost_rp_emis = ptes_annual_cost_rp(ptes_volume_emis)
-        # PTES emissions: embodied carbon per m³ per year
         ptes_emissions_cost = ptes_volume_cost * PTES_EMISSIONS["emissions_kgco2eq_per_m3"]
         ptes_emissions_emis = ptes_volume_emis * PTES_EMISSIONS["emissions_kgco2eq_per_m3"]
         
@@ -607,7 +569,6 @@ def summarize_solution(
     power_tariff = power_tariff_rp_per_kw_per_month(annual_grid_use_h)
     annual_power_cost_rp = float(monthly_peak.astype(float).sum() * power_tariff)
     annual_battery_fixed_cost_rp = (BATTERY_ECONOMIC["annual_capex_rp_per_kwh_amortized"] + BATTERY_ECONOMIC["annual_opex_rp_per_kwh_year"]) * battery_capacity
-    # RoR is charged a marginal cost per kWh produced (applies to full production series)
     runofriver_cost_per_kwh = RUNOFRIVER_ECONOMIC.get("cost_rp_per_kwh", 0.0)
     annual_runofriver_cost_rp = float(production_series.sum() * runofriver_cost_per_kwh)
     annual_battery_degradation_rp = float(
@@ -649,7 +610,6 @@ def summarize_solution(
         + annual_heatpump_capex_rp * heatpump_annual_opex_pct
     )
     
-    # Compute PTES cost using the cost function (annualized over 30 years)
     def ptes_annual_cost_rp(volume):
         if volume <= 0:
             return 0.0
@@ -690,7 +650,7 @@ def summarize_solution(
     battery_installed = clean_binary(solution["battery_installed"].iloc[0]) if "battery_installed" in solution else 0.0
     ptes_installed = clean_binary(solution["ptes_installed"].iloc[0]) if "ptes_installed" in solution else 0.0
     
-    # Calculate annual profit = revenues - costs (aligned with profit-maximization objective)
+    #  annual profit = revenues - costs (aligned with profit-maximization objective)
     annual_profit_rp = (
         + annual_export_revenue_rp         # export revenue
         + annual_thermal_revenue_rp        # heat sales revenue
@@ -746,22 +706,18 @@ def save_results(results, output_path, update_prefix=None):
     output_parent = Path(output_path).parent
     output_parent.mkdir(parents=True, exist_ok=True)
 
-    # If no selective update requested or file doesn't exist, write normally
     out_path = Path(output_path)
     if update_prefix is None or not out_path.exists():
         results.to_csv(output_path, index=False)
         return
 
-    # Merge: read existing file and replace only prefixed columns
     existing = pd.read_csv(output_path, parse_dates=["DateTime"]) if out_path.exists() else pd.DataFrame()
     if existing.empty:
         results.to_csv(output_path, index=False)
         return
 
     new = results.copy()
-    # Ensure DateTime is present and parsed
     if "DateTime" not in existing.columns or "DateTime" not in new.columns:
-        # Fallback: overwrite if DateTime missing
         results.to_csv(output_path, index=False)
         return
 
@@ -773,17 +729,13 @@ def save_results(results, output_path, update_prefix=None):
 
     cols_to_update = [c for c in new.columns if c.startswith(update_prefix)]
     if not cols_to_update:
-        # Nothing to update; leave file as-is
         existing.reset_index().to_csv(output_path, index=False)
         return
 
-    # Assign/update prefixed columns (alignment by DateTime index)
     for col in cols_to_update:
         existing[col] = new[col]
 
-    # Ensure DateTime is first column when writing
     merged = existing.reset_index()
-    # Keep original column order as much as possible: DateTime then existing cols
     merged.to_csv(output_path, index=False)
 
 
@@ -826,11 +778,9 @@ def print_summary(results, output_path):
         "Emissions objective -> profit considering emission penalty [CHF]: "
         f"{cost_with_emission_penalty_emisobj_chf:,.2f}"
     )
-    # Annual self-sufficiency (fraction of load met without grid imports)
     if "cost_opt__annual_self_sufficiency_fraction" in results.columns:
         ss = results["cost_opt__annual_self_sufficiency_fraction"].iloc[0]
     else:
-        # Fallback: compute from summed columns if present
         try:
             annual_import = results["cost_opt__grid_import_kWh"].sum()
             # Try reconstruct annual load using available columns

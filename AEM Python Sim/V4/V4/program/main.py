@@ -16,7 +16,7 @@ from results import (
 )
 
 
-# Set optimization horizon end month directly here (1-12), or None for full year.
+# set optimization horizon end month directly here (1-12), or None for full year.
 OPTIMIZATION_END_MONTH = None
 
 
@@ -48,7 +48,7 @@ def main():
 
     print(f"Starting optimization run in '{objective_mode}' mode...")
 
-    # Optional: limit optimization horizon Jan..END_MONTH (set directly in this file)
+    # NOTE OPTIONAL: limit optimization horizon Jan..END_MONTH (set directly in this file)
     end_month = OPTIMIZATION_END_MONTH
     if end_month is not None:
         # Integer-only configuration by design.
@@ -142,9 +142,6 @@ def main():
     else:
         kwh_out = "/workspaces/BAT/AEM Python Sim/V4/V4/results/emis_opt kWh results.csv"
     save_results(kwh_results, kwh_out)
-    # Selective update: only overwrite the objective-specific columns in the
-    # shared cost+emis results CSV. If the file doesn't exist, save_results
-    # will write the full DataFrame.
     if objective_mode == "cost":
         save_results(results, GENERAL["output_path"], update_prefix="cost_opt__")
     else:
